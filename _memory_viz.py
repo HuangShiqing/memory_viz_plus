@@ -12,6 +12,8 @@ import base64
 import warnings
 import operator
 import msgpack
+import zlib
+from tqdm import tqdm
 
 cache = lru_cache(None)
 
@@ -389,20 +391,19 @@ def _format_viz(data, viz_kind, device):
     seen = {}
     unique = []
     for device_idx in range(len(data["device_traces"])):
-        for alloc_idx in range(len(data["device_traces"][device_idx])):
-            for frame_idx in range(len(data["device_traces"][device_idx][alloc_idx]["frames"])):
-                d = data["device_traces"][device_idx][alloc_idx]["frames"][frame_idx]
+        for alloc_idx in tqdm(range(len(data["device_traces"][device_idx]))):
+            frames = data["device_traces"][device_idx][alloc_idx]["frames"]
+            keys = ["filename", "line", "name"]
+            for idx, d in enumerate(frames):
                 if isinstance(d, int): #skip shared memory
-                    break 
-                t = tuple(sorted(d.items()))
+                    break
+                t = tuple(d[k] for k in keys)
                 if t not in seen:
                     seen[t] = len(unique)
                     unique.append(d)
+                frames[idx] = seen[t]
 
-                data["device_traces"][device_idx][alloc_idx]["frames"][frame_idx] = seen[t]
-    
-
-    print("[hsq] delete the frames")
+    # print("[hsq] delete the frames")
     fake_frame = {"name":"hsq","filename":"hsq", "line":0}
     # for device_idx in range(len(data["device_traces"])):
     #     for alloc_idx in range(len(data["device_traces"][device_idx])):
@@ -417,7 +418,7 @@ def _format_viz(data, viz_kind, device):
     data["external_annotations"] = []
 
     packed_combine = msgpack.packb({'data':data, 'uniq':unique})
-    return packed_combine
+    return zlib.compress(packed_combine)
 
     # if device is not None:
     #     warnings.warn(
@@ -663,7 +664,7 @@ if __name__ == "__main__":
         _write(args.output, compare(before, after))
     elif args.action == 'trace_plot':
         data = _read(args.input)
-        _write(args.output + '.msgpack', trace_plot(data, device=args.device, plot_segments=args.segments))
+        _write(args.output + '.zlib', trace_plot(data, device=args.device, plot_segments=args.segments))
     elif args.action == 'segment_plot':
         data = _read(args.input)
         _write(args.output, segment_plot(data, device=args.device))

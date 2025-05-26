@@ -9,6 +9,7 @@
     Drop files here
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/msgpack-lite/0.1.26/msgpack.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
 
 <script type="module">
 
@@ -30,7 +31,13 @@ function handleFileSelect(evt) {
 
   reader.onload = function(e) {
     var contents = e.target.result;
-    var unpacked = msgpack.decode(new Uint8Array(contents));
+    // evt.target.result 是 ArrayBuffer
+    const compressed = new Uint8Array(contents);
+    // 解压
+    const decompressed = pako.inflate(compressed);
+    // 解msgpack
+    const unpacked = msgpack.decode(decompressed);
+
     // console.log(unpacked);  // 输出解码后的数据
 
     add_snapshot2("hsq_snap", unique_name => {
