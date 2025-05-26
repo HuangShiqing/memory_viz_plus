@@ -11,6 +11,7 @@ from itertools import groupby
 import base64
 import warnings
 import operator
+import msgpack
 
 cache = lru_cache(None)
 
@@ -382,20 +383,56 @@ add_local_files(local_files, $VIZ_KIND)
 """
 
 def _format_viz(data, viz_kind, device):
-    if device is not None:
-        warnings.warn(
-            'device argument is deprecated, plots now contain all device',
-            FutureWarning,
-            stacklevel=3,
-        )
-    buffer = pickle.dumps(data)
-    buffer += b'\x00' * (3 - len(buffer) % 3)
-    # Encode the buffer with base64
-    encoded_buffer = base64.b64encode(buffer).decode('utf-8')
 
-    json_format = json.dumps([{"name": 'snapshot.pickle', "base64": encoded_buffer}])
-    return _memory_viz_template.replace('$VIZ_KIND', repr(viz_kind)) \
-                               .replace('$SNAPSHOT', json_format)
+    # 去重
+    pudb.set_trace()
+    seen = {}
+    unique = []
+    for device_idx in range(len(data["device_traces"])):
+        for alloc_idx in range(len(data["device_traces"][device_idx])):
+            for frame_idx in range(len(data["device_traces"][device_idx][alloc_idx]["frames"])):
+                d = data["device_traces"][device_idx][alloc_idx]["frames"][frame_idx]
+                if isinstance(d, int): #skip shared memory
+                    break 
+                t = tuple(sorted(d.items()))
+                if t not in seen:
+                    seen[t] = len(unique)
+                    unique.append(d)
+
+                data["device_traces"][device_idx][alloc_idx]["frames"][frame_idx] = seen[t]
+    
+
+    print("[hsq] delete the frames")
+    fake_frame = {"name":"hsq","filename":"hsq", "line":0}
+    # for device_idx in range(len(data["device_traces"])):
+    #     for alloc_idx in range(len(data["device_traces"][device_idx])):
+    #         data["device_traces"][device_idx][alloc_idx]["frames"] = [fake_frame]
+    
+    for segment in data["segments"]:
+        if len(segment['frames']):
+            segment['frames'] = [fake_frame]
+        for block in segment["blocks"]:
+            if len(block['frames']):
+                block['frames'] = [fake_frame]
+    data["external_annotations"] = []
+
+    packed_combine = msgpack.packb({'data':data, 'uniq':unique})
+    return packed_combine
+
+    # if device is not None:
+    #     warnings.warn(
+    #         'device argument is deprecated, plots now contain all device',
+    #         FutureWarning,
+    #         stacklevel=3,
+    #     )
+    # buffer = pickle.dumps(data)
+    # buffer += b'\x00' * (3 - len(buffer) % 3)
+    # # Encode the buffer with base64
+    # encoded_buffer = base64.b64encode(buffer).decode('utf-8')
+
+    # json_format = json.dumps([{"name": 'snapshot.pickle', "base64": encoded_buffer}])
+    # return _memory_viz_template.replace('$VIZ_KIND', repr(viz_kind)) \
+    #                            .replace('$SNAPSHOT', json_format)
 
 def trace_plot(data, device=None, plot_segments=False):
     """Generate a visualization over time of the memory usage recorded by the trace as an html file.
@@ -626,7 +663,7 @@ if __name__ == "__main__":
         _write(args.output, compare(before, after))
     elif args.action == 'trace_plot':
         data = _read(args.input)
-        _write(args.output, trace_plot(data, device=args.device, plot_segments=args.segments))
+        _write(args.output + '.msgpack', trace_plot(data, device=args.device, plot_segments=args.segments))
     elif args.action == 'segment_plot':
         data = _read(args.input)
         _write(args.output, segment_plot(data, device=args.device))

@@ -140,7 +140,7 @@ function eventStack(e, allocated, reserved) {
       reserved,
     )} reserved)\n${event}`;
   }
-  return event + '\n' + format_frames(e.frames);
+  return event + '\n' + format_frames2(e.frames);
 }
 
 function hashCode(num) {
@@ -432,7 +432,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
             )} allocated, ` +
             `${formatSize(free)} free${internal} (stream ${
               t.stream
-            })\n${format_frames(t.frames)}`
+            })\n${format_frames2(t.frames)}`
           );
         },
         d => {
@@ -498,7 +498,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
             `${formatSize(t.requested_size)} allocation${requested} (stream ${
               t.segment.stream
             })\n` +
-            format_frames(t.frames)
+            format_frames2(t.frames)
           );
         },
         removeStroke,
@@ -529,7 +529,7 @@ function MemoryView(outer, stack_info, snapshot, device) {
               t.size - t.requested_size,
             )}` +
             ` (stream ${t.segment.stream})\n` +
-            format_frames(t.frames)
+            format_frames2(t.frames)
           );
         },
         removeStroke,
@@ -775,6 +775,27 @@ function format_frames(frames) {
   return elideRepeats(frame_strings).join('\n');
 }
 
+var uniq_frames = null
+function format_frames2(frames) {
+  if (frames.length === 0) {
+    return (
+      `This block has no frames. Potential causes:\n` +
+      `1) This block was allocated before _record_memory_history was enabled.\n` +
+      `2) The context or stacks passed to _record_memory_history does not include this block. Consider changing context to 'state', 'alloc', or 'all', or changing stacks to 'all'.\n` +
+      `3) This event occurred during backward, which has no python frames, and memory history did not include C++ frames. Use stacks='all' to record both C++ and python frames.`
+    );
+  }
+
+  var new_frames = []
+  for (let i = 0; i < frames.length; i++) {
+    new_frames[i] = uniq_frames[frames[i]];
+  }
+  const frame_strings = new_frames
+    .filter(frameFilter)
+    .map(f => `${f.filename}:${f.line}:${f.name}`);
+  return elideRepeats(frame_strings).join('\n');
+}
+
 function process_alloc_data(snapshot, device, plot_segments, max_entries) {
   const elements = [];
   const initially_allocated = [];
@@ -991,7 +1012,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
       if (!elem.action.includes('alloc')) {
         text = `${text}\nalloc not recorded, stack trace for free:`;
       }
-      text = `${text}\n${format_frames(elem.frames)}`;
+      text = `${text}\n${format_frames2(elem.frames)}`;
       return text;
     },
   };
@@ -1749,8 +1770,10 @@ export function add_snapshot2(name, loader) {
   selected_change();
 }
 
-export function finished_loading2(name, data) {
+export function finished_loading2(name, unpacked) {
   // snapshot_cache[name] = unpickle_and_annotate(data);
+  var data = unpacked['data']
+  uniq_frames = unpacked['uniq']
   snapshot_cache[name] = data;
   annotate_snapshot(data);
   snapshot_change(name);

@@ -1,0 +1,61 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+</head>
+<body>
+
+<div id="drop_zone" style="border: 1px solid black; width: 200px; height: 100px;">
+    Drop files here
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/msgpack-lite/0.1.26/msgpack.min.js"></script>
+
+<script type="module">
+
+// import {add_local_files} from "https://cdn.jsdelivr.net/gh/pytorch/pytorch@main/torch/utils/viz/MemoryViz.js"
+import {add_snapshot2} from "https://cdn.jsdelivr.net/gh/HuangShiqing/memory_viz_plus@main/MemoryViz.js"
+import {finished_loading2} from "https://cdn.jsdelivr.net/gh/HuangShiqing/memory_viz_plus@main/MemoryViz.js"
+import {selected_change} from "https://cdn.jsdelivr.net/gh/HuangShiqing/memory_viz_plus@main/MemoryViz.js"
+// import {add_snapshot2} from "./MemoryViz.js"
+// import {finished_loading2} from "./MemoryViz.js"
+// import {selected_change} from "./MemoryViz.js"
+
+function handleFileSelect(evt) {
+  evt.stopPropagation();
+  evt.preventDefault();
+
+  var files = evt.dataTransfer.files;
+  var file = files[0];
+  var reader = new FileReader();
+
+  reader.onload = function(e) {
+    var contents = e.target.result;
+    var unpacked = msgpack.decode(new Uint8Array(contents));
+    // console.log(unpacked);  // 输出解码后的数据
+
+    add_snapshot2("hsq_snap", unique_name => {
+        finished_loading2(unique_name, unpacked);
+    })
+    // if (files.length > 0) {
+    // selected_change();
+    // }
+  };
+
+  reader.readAsArrayBuffer(file);
+
+  // 隐藏 drop_zone 元素
+  dropZone.style.display = 'none';
+}
+
+function handleDragOver(evt) {
+  evt.stopPropagation();
+  evt.preventDefault();
+  evt.dataTransfer.dropEffect = 'copy';
+}
+
+var dropZone = document.getElementById('drop_zone');
+dropZone.addEventListener('dragover', handleDragOver, false);
+dropZone.addEventListener('drop', handleFileSelect, false);
+
+</script>
+</body>
