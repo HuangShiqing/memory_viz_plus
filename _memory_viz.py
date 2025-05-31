@@ -387,7 +387,6 @@ add_local_files(local_files, $VIZ_KIND)
 def _format_viz(data, viz_kind, device):
 
     # 去重
-    pudb.set_trace()
     seen = {}
     unique = []
     for device_idx in range(len(data["device_traces"])):
@@ -643,7 +642,7 @@ if __name__ == "__main__":
         return data
 
     def _write(name, data):
-        with open(name, 'w') as f:
+        with open(name, 'wb') as f:
             f.write(data)
 
     if args.action == 'segments':

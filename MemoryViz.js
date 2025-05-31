@@ -1018,6 +1018,71 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
   };
 }
 
+// =================== 拖拽平移相关 ===================
+let isDragging = false;
+let dragStartX = 0, dragStartY = 0;
+let dragOriginOffsetX = 0, dragOriginOffsetY = 0;
+// =================== 缩放相关 ===================
+let scaleX = 1, scaleY = 1;
+let offsetX = 0, offsetY = 0;
+function draw(
+  data,
+  colors
+) {
+  function format_points2(d) {
+    const size = d.size;
+    const xs = d.timesteps.map(t => xscale2(t));
+    const bottom = d.offsets.map(t => yscale2(t));
+    const m = Array.isArray(size)
+      ? (t, i) => yscale2(t + size[i])
+      : t => yscale2(t + size);
+    const top = d.offsets.map(m);
+
+    const points = [];
+    xs.forEach((x, i) => points.push([x, bottom[i]]));
+    xs.slice().reverse().forEach((x, i) => points.push([x, top[top.length - 1 - i]]));
+    return points;
+  }
+
+
+  const canvas = document.getElementById('my-canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  // ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+
+  const max_timestep = data.max_at_time.length
+  const max_size = data.max_size;
+
+  // 注意 domain 需要考虑 offset，range 需要考虑 scale
+  const xscale2 = scaleLinear()
+      .domain([offsetX, offsetX + (max_timestep / scaleX)])
+      .range([0, canvas.width]);
+  const yscale2 = scaleLinear()
+      .domain([offsetY, offsetY + (max_size / scaleY)])
+      .range([canvas.height, 0]);
+
+  //last one is summary
+  data.allocations_over_time.slice(0, -1).forEach(d => { 
+    // // 1. 计算多边形顶点
+    const points = format_points2(d);
+
+    // 3. 绘制
+    ctx.beginPath();
+    points.forEach(([x, y], i) => {
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    });
+    ctx.closePath();
+    // 选用色板或直接用 d.color
+    ctx.fillStyle = colors[d.color % colors.length] || "#ccc";
+    ctx.fill();
+    ctx.strokeStyle = "#333";
+    ctx.stroke();
+  });
+
+  ctx.restore();
+}
 function MemoryPlot(
   svg,
   data,
@@ -1072,56 +1137,159 @@ function MemoryPlot(
   const zoom_group = plot_outer.append('g');
   const scrub_group = zoom_group.append('g');
 
-  const plot = scrub_group
-    .selectAll('polygon')
-    .data(data.allocations_over_time)
-    .enter()
-    .append('polygon')
-    .attr('points', format_points)
-    .attr('fill', d => colors[d.color % colors.length]);
+  const canvas = document.getElementById('my-canvas');
+  canvas.width = window.innerWidth;
+  canvas.height = height;  // 画布的像素高度
 
-  const axis = plot_coordinate_space.append('g').call(yaxis);
+  canvas.addEventListener('wheel', function(e) {
+    // 阻止页面滚动
+    e.preventDefault();
 
-  function handleZoom() {
-    const t = d3.event.transform;
-    zoom_group.attr('transform', t);
-    axis.call(yaxis.scale(d3.event.transform.rescaleY(yscale)));
-  }
+    // 1. 计算鼠标在canvas上的像素位置
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
 
-  const thezoom = zoom().on('zoom', handleZoom);
-  plot_outer.call(thezoom);
+    const max_timestep = data.max_at_time.length;
+    const max_size = data.max_size;
 
-  return {
-    select_window: (stepbegin, stepend, max) => {
-      const begin = xscale(stepbegin);
-      const size = xscale(stepend) - xscale(stepbegin);
-      const scale = plot_width / size;
-      const translate = -begin;
-      const yscale = max_size / max;
-      scrub_group.attr(
-        'transform',
-        `scale(${scale / yscale}, 1) translate(${translate}, 0)`,
-      );
-      plot_outer.call(
-        thezoom.transform,
-        zoomIdentity
-          .scale(yscale)
-          .translate(0, -(plot_height - plot_height / yscale)),
-      );
-    },
-    set_delegate: delegate => {
-      plot
-        .on('mouseover', function (_e, _d) {
-          delegate.set_selected(d3.select(this));
-        })
-        .on('mousedown', function (_e, _d) {
-          delegate.default_selected = d3.select(this);
-        })
-        .on('mouseleave', function (_e, _d) {
-          delegate.set_selected(delegate.default_selected);
-        });
-    },
-  };
+    const dataX = offsetX + (mouseX / canvas.width) * (max_timestep / scaleX);
+    const dataY = offsetY + ((canvas.height - mouseY) / canvas.height) * (max_size / scaleY);
+
+    // 控制缩放：Shift 只缩X，Ctrl只缩Y，否则XY一起缩
+    let sX = 1, sY = 1;
+    if (e.shiftKey) {
+        sX = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    } else if (e.ctrlKey) {
+        sY = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    } else {
+        sX = sY = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    }
+
+    // // 新缩放系数
+    // scaleX *= sX;
+    // scaleY *= sY;
+    // 新缩放系数，不能小于1
+    scaleX = Math.max(1, scaleX * sX);
+    scaleY = Math.max(1, scaleY * sY);
+
+    // 推出新的 offsetX
+    offsetX = dataX - (mouseX / canvas.width) * (max_timestep / scaleX);
+    offsetY = dataY - ((canvas.height - mouseY) / canvas.height) * (max_size / scaleY);
+
+    // 限制offset范围（可选）
+    if (offsetX < 0) offsetX = 0;
+    if (offsetY < 0) offsetY = 0;
+
+    draw(data, colors); // 重新绘制
+  });
+
+
+  canvas.addEventListener('mousedown', function(e) {
+    isDragging = true;
+    const rect = canvas.getBoundingClientRect();
+    dragStartX = e.clientX - rect.left;
+    dragStartY = e.clientY - rect.top;
+    dragOriginOffsetX = offsetX;
+    dragOriginOffsetY = offsetY;
+  });
+
+  canvas.addEventListener('mousemove', function(e) {
+      if (!isDragging) return;
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      const max_timestep = data.max_at_time.length;
+      const max_size = data.max_size;
+
+      // 拖动的像素距离
+      const dx = mouseX - dragStartX;
+      const dy = mouseY - dragStartY;
+
+      // 画布宽度对应的数据跨度
+      const dataSpanX = max_timestep / scaleX;
+      const dataSpanY = max_size / scaleY;
+
+      // 当前每个像素对应的数据量
+      const xPerPixel = dataSpanX / canvas.width;
+      const yPerPixel = dataSpanY / canvas.height;
+
+      // 计算新的偏移
+      offsetX = dragOriginOffsetX - dx * xPerPixel;
+      offsetY = dragOriginOffsetY + dy * yPerPixel; // 注意y轴方向
+      // 限制offsetX: 不能小于0，不能大于max_timestep - dataSpanX
+      offsetX = Math.max(0, Math.min(offsetX, max_timestep - dataSpanX));
+      offsetY = Math.max(0, Math.min(offsetY, max_size - dataSpanY));
+
+      // 限制offset范围（可选，防止拖超边界）
+      if (offsetX < 0) offsetX = 0;
+      if (offsetY < 0) offsetY = 0;
+
+      draw(data, colors);
+  });
+
+  document.addEventListener('mouseup', function(e) {
+      isDragging = false;
+  });
+
+  // 可选：防止拖到canvas外面失效
+  canvas.addEventListener('mouseleave', function(e) {
+      isDragging = false;
+  });
+
+  draw(data, colors)
+
+  // const plot = scrub_group
+  //   .selectAll('polygon')
+  //   .data(data.allocations_over_time)
+  //   .enter()
+  //   .append('polygon')
+  //   .attr('points', format_points)
+  //   .attr('fill', d => colors[d.color % colors.length]);
+
+  // const axis = plot_coordinate_space.append('g').call(yaxis);
+
+  // function handleZoom() {
+  //   const t = d3.event.transform;
+  //   zoom_group.attr('transform', t);
+  //   axis.call(yaxis.scale(d3.event.transform.rescaleY(yscale)));
+  // }
+
+  // const thezoom = zoom().on('zoom', handleZoom);
+  // plot_outer.call(thezoom);
+
+  // return {
+  //   select_window: (stepbegin, stepend, max) => {
+  //     const begin = xscale(stepbegin);
+  //     const size = xscale(stepend) - xscale(stepbegin);
+  //     const scale = plot_width / size;
+  //     const translate = -begin;
+  //     const yscale = max_size / max;
+  //     scrub_group.attr(
+  //       'transform',
+  //       `scale(${scale / yscale}, 1) translate(${translate}, 0)`,
+  //     );
+  //     plot_outer.call(
+  //       thezoom.transform,
+  //       zoomIdentity
+  //         .scale(yscale)
+  //         .translate(0, -(plot_height - plot_height / yscale)),
+  //     );
+  //   },
+  //   set_delegate: delegate => {
+  //     plot
+  //       .on('mouseover', function (_e, _d) {
+  //         delegate.set_selected(d3.select(this));
+  //       })
+  //       .on('mousedown', function (_e, _d) {
+  //         delegate.default_selected = d3.select(this);
+  //       })
+  //       .on('mouseleave', function (_e, _d) {
+  //         delegate.set_selected(delegate.default_selected);
+  //       });
+  //   },
+  // };
 }
 
 function ContextViewer(text, data) {
@@ -1279,22 +1447,22 @@ function create_trace_view(
     Legend(plot_svg.append('g'), snapshot.categories);
   }
 
-  const mini_svg = grid_container
-    .append('svg')
-    .attr('display', 'block')
-    .attr('viewBox', '0 0 1024 60')
-    .attr('preserveAspectRatio', 'none')
-    .attr('style', 'grid-column: 1; grid-row: 2; width: 100%; height: 100%;');
+  // const mini_svg = grid_container
+  //   .append('svg')
+  //   .attr('display', 'block')
+  //   .attr('viewBox', '0 0 1024 60')
+  //   .attr('preserveAspectRatio', 'none')
+  //   .attr('style', 'grid-column: 1; grid-row: 2; width: 100%; height: 100%;');
 
-  MiniMap(mini_svg, plot, data, left_pad, 1024);
-  const context_div = grid_container
-    .append('div')
-    .attr(
-      'style',
-      'grid-column: 1; grid-row: 3; width: 100%; height: 100%; overflow: auto;',
-    );
-  const delegate = ContextViewer(context_div.append('pre').text('none'), data);
-  plot.set_delegate(delegate);
+  // MiniMap(mini_svg, plot, data, left_pad, 1024);
+  // const context_div = grid_container
+  //   .append('div')
+  //   .attr(
+  //     'style',
+  //     'grid-column: 1; grid-row: 3; width: 100%; height: 100%; overflow: auto;',
+  //   );
+  // const delegate = ContextViewer(context_div.append('pre').text('none'), data);
+  // plot.set_delegate(delegate);
 }
 
 function create_settings_view(dst, snapshot, device) {
