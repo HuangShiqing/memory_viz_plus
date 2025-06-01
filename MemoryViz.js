@@ -796,8 +796,9 @@ function format_frames2(frames) {
   return elideRepeats(frame_strings).join('\n');
 }
 
+let elements = [];
 function process_alloc_data(snapshot, device, plot_segments, max_entries) {
-  const elements = [];
+  // const elements = [];
   const initially_allocated = [];
   const actions = [];
   const addr_to_alloc = {};
@@ -1077,7 +1078,13 @@ function draw(
     // 选用色板或直接用 d.color
     ctx.fillStyle = colors[d.color % colors.length] || "#ccc";
     ctx.fill();
-    ctx.strokeStyle = "#333";
+    if (d.selected) {
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = "#f00";
+    } else {
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = "#333";
+    }
     ctx.stroke();
   });
 
@@ -1140,6 +1147,24 @@ function MemoryPlot(
   const canvas = document.getElementById('my-canvas');
   canvas.width = window.innerWidth;
   canvas.height = height;  // 画布的像素高度
+  // 布局canvas
+  canvas.style.display = 'block';
+  canvas.style.position = 'absolute';
+  canvas.style.left = '0px';
+  canvas.style.top = '0px';
+
+  const logArea = document.getElementById('log-area');
+  // 布局日志区域
+  logArea.style.position = 'absolute';
+  logArea.style.left = '0px';
+  logArea.style.top = height + 'px';
+  logArea.style.width = window.innerWidth + 'px';
+  logArea.style.height = (window.innerHeight - height) + 'px';
+  logArea.style.background = '#f9f9f9';
+  logArea.style.overflow = 'auto';
+  logArea.style.fontFamily = 'monospace';
+  logArea.style.color = '#333';
+  logArea.style.padding = '12px';
 
   canvas.addEventListener('wheel', function(e) {
     // 阻止页面滚动
@@ -1230,7 +1255,91 @@ function MemoryPlot(
   });
 
   document.addEventListener('mouseup', function(e) {
+      function context_for_id(id){
+        const elem = elements[id];
+        let text = `Addr: ${formatAddr(elem)}`;
+        text = `${text}, Size: ${formatSize(elem.size)} allocation`;
+        text = `${text}, Total memory used after allocation: ${formatSize(
+          elem.max_allocated_mem,
+        )}`;
+        if (elem.stream !== null) {
+          text = `${text}, stream ${elem.stream}`;
+        }
+        if (elem.timestamp !== null) {
+          var d = new Date(elem.time_us / 1000);
+          text = `${text}, timestamp ${d}`;
+        }
+        if (!elem.action.includes('alloc')) {
+          text = `${text}\nalloc not recorded, stack trace for free:`;
+        }
+        text = `${text}\n${format_frames2(elem.frames)}`;
+        return text;
+      }
+      function pointInPolygon(x, y, polygon) {
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+          const xi = polygon[i][0], yi = polygon[i][1];
+          const xj = polygon[j][0], yj = polygon[j][1];
+          const intersect = ((yi > y) !== (yj > y)) &&
+            (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
       isDragging = false;
+
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+  
+      // 1. 计算当前缩放/偏移下的xscale2/yscale2
+      const max_timestep = data.max_at_time.length;
+      const max_size = data.max_size;
+  
+      const xscale2 = scaleLinear()
+          .domain([offsetX, offsetX + (max_timestep / scaleX)])
+          .range([0, canvas.width]);
+      const yscale2 = scaleLinear()
+          .domain([offsetY, offsetY + (max_size / scaleY)])
+          .range([canvas.height, 0]);
+  
+      let selectedIdx = -1;
+      data.allocations_over_time.slice(0, -1).forEach((d, idx) => {
+          // 多边形顶点
+          const points = (() => {
+              const size = d.size;
+              const xs = d.timesteps.map(t => xscale2(t));
+              const bottom = d.offsets.map(t => yscale2(t));
+              const m = Array.isArray(size)
+                  ? (t, i) => yscale2(t + size[i])
+                  : t => yscale2(t + size);
+              const top = d.offsets.map(m);
+              const pts = [];
+              xs.forEach((x, i) => pts.push([x, bottom[i]]));
+              xs.slice().reverse().forEach((x, i) => pts.push([x, top[top.length - 1 - i]]));
+              return pts;
+          })();
+  
+          if (pointInPolygon(mouseX, mouseY, points)) {
+              selectedIdx = idx;
+          }
+      });
+  
+      // 设置选中状态
+      data.allocations_over_time.forEach((d, idx) => {
+          d.selected = idx === selectedIdx;
+      });
+
+      // ==== 日志显示 ====
+      const logArea = document.getElementById('log-area');
+      if (selectedIdx != -1) {
+          // logArea.textContent = 'abcdefghijklmnopqrstuvwxyz';
+          logArea.textContent = context_for_id(selectedIdx);
+      } else {
+          logArea.textContent = ''; // 未选中区域则清空
+      }
+
+      draw(data, colors);
   });
 
   // 可选：防止拖到canvas外面失效
@@ -1238,6 +1347,7 @@ function MemoryPlot(
       isDragging = false;
   });
 
+  data.allocations_over_time.forEach(d => d.selected = false);
   draw(data, colors)
 
   // const plot = scrub_group
