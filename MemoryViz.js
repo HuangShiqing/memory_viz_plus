@@ -1366,6 +1366,16 @@ function MemoryPlot(
         text = `${text}\n${format_frames2(elem.frames)}`;
         return text;
       }
+      function getBoundingBox(points) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const [x, y] of points) {
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+        return { minX, minY, maxX, maxY };
+      }
       function pointInPolygon(x, y, polygon) {
         let inside = false;
         for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
@@ -1377,6 +1387,18 @@ function MemoryPlot(
         }
         return inside;
       }
+      function pointInRectangle(x, y, rectangle) {
+        // 假设 points 按左上、右上、右下、左下顺序
+        const minX = Math.min(rectangle[0][0], rectangle[2][0]);
+        const maxX = Math.max(rectangle[0][0], rectangle[2][0]);
+        const minY = Math.min(rectangle[0][1], rectangle[2][1]);
+        const maxY = Math.max(rectangle[0][1], rectangle[2][1]);
+        if (mouseX >= minX && mouseX <= maxX && mouseY >= minY && mouseY <= maxY) {
+          return true;
+        }
+        return false;
+      }
+
       isDragging = false;
 
       const rect = canvas.getBoundingClientRect();
@@ -1412,10 +1434,24 @@ function MemoryPlot(
               xs.slice().reverse().forEach((x, i) => pts.push([x, top[top.length - 1 - i]]));
               return pts;
           })();
-  
-          if (pointInPolygon(mouseX, mouseY, points)) {
+
+          const bbox = getBoundingBox(points);
+          if (
+            mouseX < bbox.minX || mouseX > bbox.maxX ||
+            mouseY < bbox.minY || mouseY > bbox.maxY
+          ) {
+            continue; // 跳过，点不可能在多边形内
+          }
+          if (points.length == 4) {
+            if (pointInRectangle(mouseX, mouseY, points)) {
+                selectedIdx = idx;
+                break;
+            }
+          } else {
+            if (pointInPolygon(mouseX, mouseY, points)) {
               selectedIdx = idx;
               break;
+            }
           }
       };
 
