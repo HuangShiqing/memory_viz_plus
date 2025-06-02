@@ -1090,6 +1090,18 @@ function draw(
 
   ctx.restore();
 }
+
+function throttle(fn, delay) {
+  let last = 0;
+  return function(...args) {
+    const now = Date.now();
+    if (now - last > delay) {
+      last = now;
+      fn.apply(this, args);
+    }
+  };
+}
+
 function MemoryPlot(
   svg,
   data,
@@ -1166,7 +1178,8 @@ function MemoryPlot(
   logArea.style.color = '#333';
   logArea.style.padding = '12px';
 
-  canvas.addEventListener('wheel', function(e) {
+  const draw_time = 50; //ms
+  canvas.addEventListener('wheel', throttle(function(e) {
     // 阻止页面滚动
     e.preventDefault();
 
@@ -1207,7 +1220,7 @@ function MemoryPlot(
     if (offsetY < 0) offsetY = 0;
 
     draw(data, colors); // 重新绘制
-  });
+  }, draw_time));
 
 
   canvas.addEventListener('mousedown', function(e) {
@@ -1219,7 +1232,7 @@ function MemoryPlot(
     dragOriginOffsetY = offsetY;
   });
 
-  canvas.addEventListener('mousemove', function(e) {
+  canvas.addEventListener('mousemove', throttle(function(e) {
       if (!isDragging) return;
       const rect = canvas.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
@@ -1252,9 +1265,9 @@ function MemoryPlot(
       if (offsetY < 0) offsetY = 0;
 
       draw(data, colors);
-  });
+  }, draw_time));
 
-  document.addEventListener('mouseup', function(e) {
+  document.addEventListener('mouseup', throttle(function(e) {
       function context_for_id(id){
         const elem = elements[id];
         let text = `Addr: ${formatAddr(elem)}`;
@@ -1340,7 +1353,7 @@ function MemoryPlot(
       }
 
       draw(data, colors);
-  });
+  }, draw_time));
 
   // 可选：防止拖到canvas外面失效
   canvas.addEventListener('mouseleave', function(e) {
