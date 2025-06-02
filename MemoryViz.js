@@ -1026,6 +1026,10 @@ let dragOriginOffsetX = 0, dragOriginOffsetY = 0;
 // =================== 缩放相关 ===================
 let scaleX = 1, scaleY = 1;
 let offsetX = 0, offsetY = 0;
+// =================== 离屏点击优化相关 ===================
+let offCanvas;
+let last_click;
+
 function draw(
   data,
   colors
@@ -1048,9 +1052,9 @@ function draw(
 
   const canvas = document.getElementById('my-canvas');
   const ctx = canvas.getContext('2d');
-  ctx.save();
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  // ctx.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+
+  const offCtx = offCanvas.getContext('2d');
+  offCtx.clearRect(0, 0, canvas.width, canvas.height);
 
   const max_timestep = data.max_at_time.length
   const max_size = data.max_size;
@@ -1069,26 +1073,99 @@ function draw(
     const points = format_points2(d);
 
     // 3. 绘制
-    ctx.beginPath();
+    offCtx.beginPath();
     points.forEach(([x, y], i) => {
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      if (i === 0) offCtx.moveTo(x, y);
+      else offCtx.lineTo(x, y);
     });
-    ctx.closePath();
+    offCtx.closePath();
     // 选用色板或直接用 d.color
-    ctx.fillStyle = colors[d.color % colors.length] || "#ccc";
-    ctx.fill();
-    if (d.selected) {
-        ctx.lineWidth = 4;
-        ctx.strokeStyle = "#f00";
-    } else {
-        ctx.lineWidth = 1;
-        ctx.strokeStyle = "#333";
-    }
-    ctx.stroke();
+    offCtx.fillStyle = colors[d.color % colors.length] || "#ccc";
+    offCtx.fill();
+    offCtx.lineWidth = 1;
+    offCtx.strokeStyle = "#333";
+    offCtx.stroke();
   });
 
-  ctx.restore();
+  offCtx.restore();
+
+  ctx.clearRect(0, 0, canvas.width, canvas.height); 
+  ctx.drawImage(offCanvas, 0, 0);
+}
+function draw_click(
+  data,
+  click_idx,
+  colors
+) {
+  function format_points2(d) {
+    const size = d.size;
+    const xs = d.timesteps.map(t => xscale2(t));
+    const bottom = d.offsets.map(t => yscale2(t));
+    const m = Array.isArray(size)
+      ? (t, i) => yscale2(t + size[i])
+      : t => yscale2(t + size);
+    const top = d.offsets.map(m);
+
+    const points = [];
+    xs.forEach((x, i) => points.push([x, bottom[i]]));
+    xs.slice().reverse().forEach((x, i) => points.push([x, top[top.length - 1 - i]]));
+    return points;
+  }
+
+  const canvas = document.getElementById('my-canvas');
+  const ctx = canvas.getContext('2d');
+
+  const offCtx = offCanvas.getContext('2d');
+  offCtx.clearRect(0, 0, canvas.width, canvas.height);
+  
+  offCtx.save();
+  const max_timestep = data.max_at_time.length
+  const max_size = data.max_size;
+
+  // 注意 domain 需要考虑 offset，range 需要考虑 scale
+  const xscale2 = scaleLinear()
+      .domain([offsetX, offsetX + (max_timestep / scaleX)])
+      .range([yAxisWidth, canvas.width]);
+  const yscale2 = scaleLinear()
+      .domain([offsetY, offsetY + (max_size / scaleY)])
+      .range([canvas.height, 0]);
+
+  const d = data.allocations_over_time[click_idx]
+
+  const two_data = [last_click, d]
+  last_click = d
+
+  two_data.forEach((d, idx) => {
+    if(!d)
+      return;
+
+    // // 1. 计算多边形顶点
+    const points = format_points2(d);
+
+    // 3. 绘制
+    offCtx.beginPath();
+    points.forEach(([x, y], i) => {
+      if (i === 0) offCtx.moveTo(x, y);
+      else offCtx.lineTo(x, y);
+    });
+    offCtx.closePath();
+    // 选用色板或直接用 d.color
+    offCtx.fillStyle = colors[d.color % colors.length] || "#ccc";
+    offCtx.fill();
+
+    if (idx == 0) {
+      offCtx.lineWidth = 1;
+      offCtx.strokeStyle = "#333";
+    } else {
+      offCtx.lineWidth = 8;
+      offCtx.strokeStyle = "#f00";
+      offCtx.clip();//防止溢出
+    }
+    offCtx.stroke();
+  })
+
+  offCtx.restore();
+  ctx.drawImage(offCanvas, 0, 0);
 }
 
 function throttle(fn, delay) {
@@ -1164,6 +1241,7 @@ function MemoryPlot(
   canvas.style.position = 'absolute';
   canvas.style.left = '0px';
   canvas.style.top = '0px';
+  offCanvas = new OffscreenCanvas(canvas.width, canvas.height);
 
   const logArea = document.getElementById('log-area');
   // 布局日志区域
@@ -1317,7 +1395,9 @@ function MemoryPlot(
           .range([canvas.height, 0]);
   
       let selectedIdx = -1;
-      data.allocations_over_time.slice(0, -1).forEach((d, idx) => {
+      const arr = data.allocations_over_time;
+      for (let idx = 0; idx < arr.length - 1; idx++) {
+          const d = arr[idx];
           // 多边形顶点
           const points = (() => {
               const size = d.size;
@@ -1335,13 +1415,9 @@ function MemoryPlot(
   
           if (pointInPolygon(mouseX, mouseY, points)) {
               selectedIdx = idx;
+              break;
           }
-      });
-  
-      // 设置选中状态
-      data.allocations_over_time.forEach((d, idx) => {
-          d.selected = idx === selectedIdx;
-      });
+      };
 
       // ==== 日志显示 ====
       const logArea = document.getElementById('log-area');
@@ -1352,7 +1428,8 @@ function MemoryPlot(
           logArea.textContent = ''; // 未选中区域则清空
       }
 
-      draw(data, colors);
+      // draw(data, colors);
+      draw_click(data, selectedIdx, colors)
   }, draw_time));
 
   // 可选：防止拖到canvas外面失效
@@ -1360,7 +1437,6 @@ function MemoryPlot(
       isDragging = false;
   });
 
-  data.allocations_over_time.forEach(d => d.selected = false);
   draw(data, colors)
 
   // const plot = scrub_group
