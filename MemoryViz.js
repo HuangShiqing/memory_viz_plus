@@ -1019,6 +1019,7 @@ function process_alloc_data(snapshot, device, plot_segments, max_entries) {
   };
 }
 
+let yAxisWidth;
 // =================== 拖拽平移相关 ===================
 let isDragging = false;
 let dragStartX = 0, dragStartY = 0;
@@ -1034,6 +1035,56 @@ function draw(
   data,
   colors
 ) {
+  function drawYAxis(ctx, yscale2, minValue, maxValue, height) {
+    /**
+     * 将字节数自动格式化为最合适的单位
+     * @param {number} bytes - 当前最大值（比如Y轴最大）
+     * @return {object} {unit, divider, label}
+     */
+    function autoUnit(bytes) {
+      if (bytes >= 1 << 30) return {unit: 'GB', divider: 1 << 30, label: 'GB'};
+      if (bytes >= 1 << 20) return {unit: 'MB', divider: 1 << 20, label: 'MB'};
+      if (bytes >= 1 << 10) return {unit: 'KB', divider: 1 << 10, label: 'KB'};
+      return {unit: 'B', divider: 1, label: '字节'};
+    }
+
+    ctx.save();
+    ctx.clearRect(0, 0, yAxisWidth, height);
+
+    ctx.strokeStyle = '#333';
+    ctx.beginPath();
+    ctx.moveTo(yAxisWidth - 1, 0);
+    ctx.lineTo(yAxisWidth - 1, height);
+    ctx.stroke();
+
+    // ======= 自动单位逻辑 =======
+    const {unit, divider, label} = autoUnit(maxValue);
+
+    ctx.font = '12px Arial';
+    ctx.fillStyle = '#333';
+    ctx.textAlign = 'right';
+    // 刻度数
+    const tickCount = 6;
+    for (let i = 0; i < tickCount; i++) {
+      let value = minValue + (maxValue - minValue) * (1 - i / (tickCount - 1));
+      let y = yscale2(value);
+      // 转换为单位后的数值
+      let displayValue = value / divider;
+      // 保留两位小数显示
+      ctx.beginPath();
+      ctx.moveTo(yAxisWidth - 5, y);
+      ctx.lineTo(yAxisWidth - 1, y);
+      ctx.stroke();
+      ctx.fillText(displayValue.toFixed(displayValue >= 100 ? 0 : 2), yAxisWidth - 8, y + 4);
+    }
+    // 绘制单位label（在最上方或最下方）
+    ctx.save();
+    ctx.font = 'bold 12px Arial';
+    ctx.fillStyle = '#333';
+    ctx.textAlign = 'center';
+    ctx.fillText(label, yAxisWidth / 2, 16); // 可根据实际调整位置
+    ctx.restore();
+  }
   function format_points2(d) {
     const size = d.size;
     const xs = d.timesteps.map(t => xscale2(t));
@@ -1062,7 +1113,8 @@ function draw(
   // 注意 domain 需要考虑 offset，range 需要考虑 scale
   const xscale2 = scaleLinear()
       .domain([offsetX, offsetX + (max_timestep / scaleX)])
-      .range([0, canvas.width]);
+      .range([yAxisWidth, canvas.width]);
+  //TODO: 第一个矩阵的x是0, 但是offsetX可能会超过0, 则x会超出yAxisWidth
   const yscale2 = scaleLinear()
       .domain([offsetY, offsetY + (max_size / scaleY)])
       .range([canvas.height, 0]);
@@ -1086,6 +1138,9 @@ function draw(
     offCtx.strokeStyle = "#333";
     offCtx.stroke();
   });
+
+  // 1. 画Y轴
+  drawYAxis(offCtx, yscale2, offsetY, offsetY + (max_size / scaleY), canvas.height);
 
   offCtx.restore();
 
@@ -1243,6 +1298,7 @@ function MemoryPlot(
   canvas.style.top = '0px';
   offCanvas = new OffscreenCanvas(canvas.width, canvas.height);
 
+  yAxisWidth = 60; // Y轴预留宽度
   const logArea = document.getElementById('log-area');
   // 布局日志区域
   logArea.style.position = 'absolute';
@@ -1263,13 +1319,15 @@ function MemoryPlot(
 
     // 1. 计算鼠标在canvas上的像素位置
     const rect = canvas.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
+    let mouseX = e.clientX - rect.left - yAxisWidth;
+    // 限制在内容区范围内
+    mouseX = Math.max(0, Math.min(mouseX, canvas.width - yAxisWidth));
     const mouseY = e.clientY - rect.top;
 
     const max_timestep = data.max_at_time.length;
     const max_size = data.max_size;
 
-    const dataX = offsetX + (mouseX / canvas.width) * (max_timestep / scaleX);
+    const dataX = offsetX + ((mouseX) / (canvas.width - yAxisWidth)) * (max_timestep / scaleX);
     const dataY = offsetY + ((canvas.height - mouseY) / canvas.height) * (max_size / scaleY);
 
     // 控制缩放：Shift 只缩X，Ctrl只缩Y，否则XY一起缩
@@ -1290,7 +1348,7 @@ function MemoryPlot(
     scaleY = Math.max(1, scaleY * sY);
 
     // 推出新的 offsetX
-    offsetX = dataX - (mouseX / canvas.width) * (max_timestep / scaleX);
+    offsetX = dataX - ((mouseX) / (canvas.width - yAxisWidth)) * (max_timestep / scaleX);
     offsetY = dataY - ((canvas.height - mouseY) / canvas.height) * (max_size / scaleY);
 
     // 限制offset范围（可选）
@@ -1304,7 +1362,7 @@ function MemoryPlot(
   canvas.addEventListener('mousedown', function(e) {
     isDragging = true;
     const rect = canvas.getBoundingClientRect();
-    dragStartX = e.clientX - rect.left;
+    dragStartX = e.clientX - rect.left - yAxisWidth;
     dragStartY = e.clientY - rect.top;
     dragOriginOffsetX = offsetX;
     dragOriginOffsetY = offsetY;
@@ -1313,7 +1371,7 @@ function MemoryPlot(
   canvas.addEventListener('mousemove', throttle(function(e) {
       if (!isDragging) return;
       const rect = canvas.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
+      const mouseX = e.clientX - rect.left - yAxisWidth;
       const mouseY = e.clientY - rect.top;
 
       const max_timestep = data.max_at_time.length;
@@ -1328,7 +1386,7 @@ function MemoryPlot(
       const dataSpanY = max_size / scaleY;
 
       // 当前每个像素对应的数据量
-      const xPerPixel = dataSpanX / canvas.width;
+      const xPerPixel = dataSpanX / (canvas.width - yAxisWidth);
       const yPerPixel = dataSpanY / canvas.height;
 
       // 计算新的偏移
@@ -1411,7 +1469,7 @@ function MemoryPlot(
   
       const xscale2 = scaleLinear()
           .domain([offsetX, offsetX + (max_timestep / scaleX)])
-          .range([0, canvas.width]);
+          .range([yAxisWidth, canvas.width]);
       const yscale2 = scaleLinear()
           .domain([offsetY, offsetY + (max_size / scaleY)])
           .range([canvas.height, 0]);
