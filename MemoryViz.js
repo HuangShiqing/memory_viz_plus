@@ -796,7 +796,7 @@ function format_frames2(frames) {
   return elideRepeats(frame_strings).join('\n');
 }
 
-let elements = [];
+// let elements = [];
 function process_alloc_data(snapshot, device, plot_segments, max_entries) {
   // const elements = [];
   const initially_allocated = [];
@@ -1255,38 +1255,38 @@ function MemoryPlot(
     return `${p0.join(' ')} ${p1.join(' ')}`;
   }
 
-  const max_timestep = data.max_at_time.length;
-  const max_size = data.max_size;
+  // const max_timestep = data.max_at_time.length;
+  // const max_size = data.max_size;
 
-  const plot_width = width - left_pad;
-  const plot_height = height;
+  // const plot_width = width - left_pad;
+  // const plot_height = height;
 
-  const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  const yaxis = axisLeft(yscale).tickFormat(d3.format('.3s'));
-  const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
-  const plot_coordinate_space = svg
-    .append('g')
-    .attr('transform', `translate(${left_pad}, ${0})`);
-  const plot_outer = plot_coordinate_space.append('g');
+  // const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
+  // const yaxis = axisLeft(yscale).tickFormat(d3.format('.3s'));
+  // const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
+  // const plot_coordinate_space = svg
+  //   .append('g')
+  //   .attr('transform', `translate(${left_pad}, ${0})`);
+  // const plot_outer = plot_coordinate_space.append('g');
 
-  function view_rect(a) {
-    return a
-      .append('rect')
-      .attr('x', 0)
-      .attr('y', 0)
-      .attr('width', plot_width)
-      .attr('height', plot_height)
-      .attr('fill', 'white');
-  }
+  // function view_rect(a) {
+  //   return a
+  //     .append('rect')
+  //     .attr('x', 0)
+  //     .attr('y', 0)
+  //     .attr('width', plot_width)
+  //     .attr('height', plot_height)
+  //     .attr('fill', 'white');
+  // }
 
-  view_rect(plot_outer);
+  // view_rect(plot_outer);
 
-  const cp = svg.append('clipPath').attr('id', 'clip');
-  view_rect(cp);
-  plot_outer.attr('clip-path', 'url(#clip)');
+  // const cp = svg.append('clipPath').attr('id', 'clip');
+  // view_rect(cp);
+  // plot_outer.attr('clip-path', 'url(#clip)');
 
-  const zoom_group = plot_outer.append('g');
-  const scrub_group = zoom_group.append('g');
+  // const zoom_group = plot_outer.append('g');
+  // const scrub_group = zoom_group.append('g');
 
   const canvas = document.getElementById('my-canvas');
   canvas.width = window.innerWidth;
@@ -1405,7 +1405,7 @@ function MemoryPlot(
 
   document.addEventListener('mouseup', throttle(function(e) {
       function context_for_id(id){
-        const elem = elements[id];
+        const elem = data.elements[id];
         let text = `Addr: ${formatAddr(elem)}`;
         text = `${text}, Size: ${formatSize(elem.size)} allocation`;
         text = `${text}, Total memory used after allocation: ${formatSize(
@@ -1705,40 +1705,40 @@ function create_trace_view(
   max_entries = 15000,
 ) {
   const left_pad = 70;
-  const data = process_alloc_data(snapshot, device, plot_segments, max_entries);
-  dst.selectAll('svg').remove();
-  dst.selectAll('div').remove();
+  // const data = process_alloc_data(snapshot, device, plot_segments, max_entries);
+  // dst.selectAll('svg').remove();
+  // dst.selectAll('div').remove();
 
-  const d = dst.append('div');
-  d.append('input')
-    .attr('type', 'range')
-    .attr('min', 0)
-    .attr('max', data.elements_length)
-    .attr('value', max_entries)
-    .on('change', function () {
-      create_trace_view(dst, snapshot, device, plot_segments, this.value);
-    });
-  d.append('label').text('Detail');
+  // const d = dst.append('div');
+  // d.append('input')
+  //   .attr('type', 'range')
+  //   .attr('min', 0)
+  //   .attr('max', data.elements_length)
+  //   .attr('value', max_entries)
+  //   .on('change', function () {
+  //     create_trace_view(dst, snapshot, device, plot_segments, this.value);
+  //   });
+  // d.append('label').text('Detail');
 
-  const grid_container = dst
-    .append('div')
-    .attr(
-      'style',
-      'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; height: 100%; gap: 10px',
-    );
+  // const grid_container = dst
+  //   .append('div')
+  //   .attr(
+  //     'style',
+  //     'display: grid; grid-template-columns: 1fr; grid-template-rows: 10fr 1fr 8fr; height: 100%; gap: 10px',
+  //   );
 
-  const plot_svg = grid_container
-    .append('svg')
-    .attr('display', 'block')
-    .attr('viewBox', '0 0 1024 576')
-    .attr('preserveAspectRatio', 'none')
-    .attr('style', 'grid-column: 1; grid-row: 1; width: 100%; height: 100%;');
+  // const plot_svg = grid_container
+  //   .append('svg')
+  //   .attr('display', 'block')
+  //   .attr('viewBox', '0 0 1024 576')
+  //   .attr('preserveAspectRatio', 'none')
+  //   .attr('style', 'grid-column: 1; grid-row: 1; width: 100%; height: 100%;');
 
-  const plot = MemoryPlot(plot_svg, data, left_pad, 1024, 576);
+  const plot = MemoryPlot(null, snapshot[device], left_pad, 1024, 576);
 
-  if (snapshot.categories.length !== 0) {
-    Legend(plot_svg.append('g'), snapshot.categories);
-  }
+  // if (snapshot.categories.length !== 0) {
+  //   Legend(plot_svg.append('g'), snapshot.categories);
+  // }
 
   // const mini_svg = grid_container
   //   .append('svg')
@@ -2106,13 +2106,13 @@ function snapshot_change(f) {
   let device = Number(gpu.node().value);
   const snapshot = snapshot_cache[f];
   gpu.selectAll('option').remove();
-  const has_segments = {};
-  for (const s of snapshot.segments) {
-    has_segments[s.device] = true;
-  }
+  // const has_segments = {};
+  // for (const s of snapshot.segments) {
+  //   has_segments[s.device] = true;
+  // }
   let device_valid = false;
-  for (const [i, trace] of snapshot.device_traces.entries()) {
-    if (trace.length > 0 || i in has_segments) {
+  for (const [i, trace] of snapshot.entries()) {
+    if (trace.allocations_over_time.length > 0) {
       gpu.append('option').text(i);
       if (i === device) {
         device_valid = true;
@@ -2236,6 +2236,6 @@ export function finished_loading2(name, unpacked) {
   var data = unpacked['data']
   uniq_frames = unpacked['uniq']
   snapshot_cache[name] = data;
-  annotate_snapshot(data);
+  // annotate_snapshot(data);//TODO: need add it in py
   snapshot_change(name);
 }

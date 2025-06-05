@@ -384,13 +384,196 @@ add_local_files(local_files, $VIZ_KIND)
 </body>
 """
 
+def process_alloc_data(snapshot, device, plot_segments, max_entries):
+    elements = []
+    initially_allocated = []
+    actions = []
+    addr_to_alloc = {}
+
+    alloc = 'segment_alloc' if plot_segments else 'alloc'
+    if plot_segments:
+        free, free_completed = 'segment_free', 'segment_free'
+    else:
+        free, free_completed = 'free', 'free_completed'
+
+    # 1. first pass: build elements and actions
+    for e in tqdm(snapshot['device_traces'][device], desc = f"dev{device}预处理"):
+        action = e['action']
+        if action == alloc:
+            elements.append(e)
+            addr_to_alloc[e['addr']] = len(elements) - 1
+            actions.append(len(elements) - 1)
+        elif action == free or action == free_completed:
+            if e['addr'] in addr_to_alloc:
+                actions.append(addr_to_alloc[e['addr']])
+                del addr_to_alloc[e['addr']]
+            else:
+                elements.append(e)
+                initially_allocated.append(len(elements) - 1)
+                actions.append(len(elements) - 1)
+        else:
+            continue
+
+    # 2. second pass: add missing allocations from segments
+    for seg in snapshot['segments']:
+        if seg['device'] != device:
+            continue
+        if plot_segments:
+            if seg['address'] not in addr_to_alloc:
+                element = {
+                    'action': 'alloc',
+                    'addr': seg['address'],
+                    'size': seg['total_size'],
+                    'frames': [],
+                    'stream': seg['stream'],
+                    'version': seg['version'],
+                }
+                elements.append(element)
+                initially_allocated.append(len(elements) - 1)
+        else:
+            for b in seg['blocks']:
+                if b['state'] == 'active_allocated' and b['address'] not in addr_to_alloc:
+                    element = {
+                        'action': 'alloc',
+                        'addr': b['address'],
+                        'size': b['requested_size'],
+                        'frames': b['frames'],
+                        'stream': seg['stream'],
+                        'version': b['version'],
+                    }
+                    elements.append(element)
+                    initially_allocated.append(len(elements) - 1)
+
+    initially_allocated = initially_allocated[::-1]
+
+    if len(actions) == 0 and len(initially_allocated) > 0:
+        actions.append(initially_allocated.pop())
+
+    current = []
+    current_data = []
+    data_out = []
+    max_size = 0
+
+    total_mem = 0
+    total_summarized_mem = 0
+    timestep = 0
+
+    max_at_time = []
+
+    summarized_mem = {
+        'elem': 'summarized',
+        'timesteps': [],
+        'offsets': [total_mem],
+        'size': [],
+        'color': 0,
+    }
+    summarized_elems = {}
+
+    def advance(n):
+        nonlocal timestep
+        summarized_mem['timesteps'].append(timestep)
+        summarized_mem['offsets'].append(total_mem)
+        summarized_mem['size'].append(total_summarized_mem)
+        timestep += n
+        for _ in range(n):
+            max_at_time.append(total_mem + total_summarized_mem)
+
+    # sort elements by size, descending, keep only max_entries
+    sizes = sorted(
+        [(elem.get('size', 0), idx) for idx, elem in enumerate(elements)],
+        key=lambda x: -x[0]
+    )
+    draw_elem = {e: True for _s, e in sizes[:max_entries]}
+
+    def add_allocation(elem):
+        nonlocal total_mem, total_summarized_mem, timestep
+        element_obj = elements[elem]
+        size = element_obj.get('size', 0)
+        current.append(elem)
+        color = elem
+        # category/color logic
+        if snapshot.get('categories', []):
+            color = snapshot['categories'].index(element_obj.get('category', 'unknown')) \
+                if element_obj.get('category', 'unknown') in snapshot['categories'] \
+                else 0
+        e = {
+            'elem': elem,
+            'timesteps': [timestep],
+            'offsets': [total_mem],
+            'size': size,
+            'color': color,
+        }
+        current_data.append(e)
+        data_out.append(e)
+        total_mem += size
+        element_obj['max_allocated_mem'] = total_mem + total_summarized_mem
+
+    for elem in initially_allocated:
+        if elem in draw_elem:
+            add_allocation(elem)
+        else:
+            total_summarized_mem += elements[elem].get('size', 0)
+            summarized_elems[elem] = True
+
+    for elem in actions:
+        size = elements[elem].get('size', 0)
+        if elem not in draw_elem:
+            if summarized_elems.get(elem):
+                advance(1)
+                total_summarized_mem -= size
+                summarized_elems[elem] = None
+            else:
+                total_summarized_mem += size
+                summarized_elems[elem] = True
+                advance(1)
+            continue
+        # Find last index in current where x == elem
+        try:
+            idx = len(current) - 1 - current[::-1].index(elem)
+        except ValueError:
+            idx = -1
+        if idx == -1:
+            add_allocation(elem)
+            advance(1)
+        else:
+            advance(1)
+            removed = current_data[idx]
+            removed['timesteps'].append(timestep)
+            removed['offsets'].append(removed['offsets'][-1])
+            del current[idx]
+            del current_data[idx]
+            if idx < len(current):
+                for j in range(idx, len(current)):
+                    e = current_data[j]
+                    e['timesteps'].append(timestep)
+                    e['offsets'].append(e['offsets'][-1])
+                    e['timesteps'].append(timestep + 3)
+                    e['offsets'].append(e['offsets'][-1] - size)
+                advance(3)
+            total_mem -= size
+        max_size = max(total_mem + total_summarized_mem, max_size)
+
+    for elem in current_data:
+        elem['timesteps'].append(timestep)
+        elem['offsets'].append(elem['offsets'][-1])
+    data_out.append(summarized_mem)
+
+    return {
+        'max_size': max_size,
+        'allocations_over_time': data_out,
+        'max_at_time': max_at_time,
+        'summarized_mem': summarized_mem,
+        'elements_length': len(elements),
+        'elements': elements
+    }
+
 def _format_viz(data, viz_kind, device):
 
     # 去重
     seen = {}
     unique = []
     for device_idx in range(len(data["device_traces"])):
-        for alloc_idx in tqdm(range(len(data["device_traces"][device_idx]))):
+        for alloc_idx in tqdm(range(len(data["device_traces"][device_idx])), desc = f"dev{device_idx}去重"):
             frames = data["device_traces"][device_idx][alloc_idx]["frames"]
             keys = ["filename", "line", "name"]
             for idx, d in enumerate(frames):
@@ -416,7 +599,11 @@ def _format_viz(data, viz_kind, device):
                 block['frames'] = [fake_frame]
     data["external_annotations"] = []
 
-    packed_combine = msgpack.packb({'data':data, 'uniq':unique})
+    data_outs =[]
+    for device_idx in range(len(data["device_traces"])):
+        data_out = process_alloc_data(data, device_idx, False, None)
+        data_outs.append(data_out)
+    packed_combine = msgpack.packb({'data':data_outs, 'uniq':unique})
     return zlib.compress(packed_combine)
 
     # if device is not None:
