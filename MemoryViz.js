@@ -2260,7 +2260,9 @@ export function add_snapshot2(name, loader) {
   // if (name in snapshot_to_loader) {
   //   name = `${name} (${next_unique_n++})`;
   // }
-  snapshot_select.append('option').text(name);
+  if (snapshot_select.select('option').empty()) {
+    snapshot_select.append('option').text(name);
+  }
   snapshot_to_loader[name] = loader;
 
   selected_change();
@@ -2272,7 +2274,7 @@ let default_devid;
 export function finished_loading2(name, unpacked) {
   // snapshot_cache[name] = unpickle_and_annotate(data);
   var data = unpacked['data']
-  uniq_frames = unpacked['uniq']
+  uniq_frames = unpacked['uniq_frames']
   pages_num = unpacked['pages_num']
   device_num = unpacked['device_num']
   default_devid = unpacked['default_devid']

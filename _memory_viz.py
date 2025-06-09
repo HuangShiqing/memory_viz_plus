@@ -13,6 +13,7 @@ import warnings
 import operator
 import msgpack
 import zlib
+import struct
 from tqdm import tqdm
 
 cache = lru_cache(None)
@@ -384,7 +385,7 @@ add_local_files(local_files, $VIZ_KIND)
 </body>
 """
 
-def process_alloc_data(snapshot, device, plot_segments, max_entries, num_pages = 10):
+def process_alloc_data(snapshot, device, plot_segments, max_entries, pages_num=1):
     elements = []
     initially_allocated = []
     actions = []
@@ -560,14 +561,12 @@ def process_alloc_data(snapshot, device, plot_segments, max_entries, num_pages =
         elem['offsets'].append(elem['offsets'][-1])
     data_out.append(summarized_mem)
 
-    # pudb.set_trace()
-    # num_pages = 3  # 你可以改成任意整数
     N = len(max_at_time)
-    page_points = [int(round(i * N / num_pages)) for i in range(num_pages + 1)]
-    page_data_out = [[] for _ in range(num_pages)]
+    page_points = [int(round(i * N / pages_num)) for i in range(pages_num + 1)]
+    page_data_out = [[] for _ in range(pages_num)]
     # 新增分割 max_at_time
     page_max_at_time = []
-    for i in range(num_pages):
+    for i in range(pages_num):
         left, right = page_points[i], page_points[i + 1]
         page_max_at_time.append(max_at_time[left:right])
 
@@ -576,7 +575,7 @@ def process_alloc_data(snapshot, device, plot_segments, max_entries, num_pages =
         min_t = min(timesteps)
         max_t = max(timesteps)
 
-        for i in range(num_pages):
+        for i in range(pages_num):
             new_item = None
             left, right = page_points[i], page_points[i + 1]
             # 完全在当前区间
@@ -641,18 +640,18 @@ def process_alloc_data(snapshot, device, plot_segments, max_entries, num_pages =
                     new_item = item.copy()
                     new_item['timesteps'] = [t - left for t in ts]
                     new_item['offsets'] = ofs
-                    
+
             if new_item:
                 page_data_out[i].append(new_item)
 
     return [ {
-        'page_num': num_pages,
+        'page_num': pages_num,
         'max_size': max_size,
         'allocations_over_time': page_data_out[i],
         'max_at_time': page_max_at_time[i],
-        } for i in range(num_pages)]
+        } for i in range(pages_num)]
     # return {
-    #     'page_num': num_pages,
+    #     'page_num': pages_num,
     #     'max_size': max_size,
     #     'page_allocations_over_time': page_data_out,
     #     "page_max_timestep": page_max_timestep,
@@ -661,12 +660,18 @@ def process_alloc_data(snapshot, device, plot_segments, max_entries, num_pages =
     #     'elements': elements #TODO: split page
     # }
 
-def _format_viz(data, viz_kind, device):
-
+def _format_viz(data, viz_kind, device, pages_num):
     # 去重
     seen = {}
     unique = []
+    max_traces_num = -1
+    default_devid = 0
     for device_idx in range(len(data["device_traces"])):
+        if len(data["device_traces"][device_idx]) == 0: #skip empty
+            continue
+        if len(data["device_traces"][device_idx]) > max_traces_num:
+            max_traces_num = len(data["device_traces"][device_idx])
+            default_devid = device_idx
         for alloc_idx in tqdm(range(len(data["device_traces"][device_idx])), desc = f"dev{device_idx}去重"):
             frames = data["device_traces"][device_idx][alloc_idx]["frames"]
             keys = ["filename", "line", "name"]
@@ -695,34 +700,51 @@ def _format_viz(data, viz_kind, device):
 
     data_outs =[]
     for device_idx in range(len(data["device_traces"])):
-        data_out = process_alloc_data(data, device_idx, False, None, num_pages = 3)
+        data_out = process_alloc_data(data, device_idx, False, None, pages_num=pages_num)
         data_outs.append(data_out)
 
-    offset_table = []
-    current_offset = 0
-    data_chunks = []
+    current = 0
+    # 1. uniq_frames 压缩
+    uniq_frames_bytes = msgpack.packb(unique)
+    uniq_frames_zlib = zlib.compress(uniq_frames_bytes)
+    uniq_frames_offset = (current, len(uniq_frames_zlib), 'uniq_frames_offset')
+    current += len(uniq_frames_zlib)
+
+    pages_offset = []
+    # 2. 各page独立压缩
+    pages_zlib = []
     for device_idx, device_pages in enumerate(data_outs):
         device_offsets = []
+        device_pages_zlib = []
         for page_idx, page_data in enumerate(device_pages):
-            packed = msgpack.packb(page_data)
-            data_chunks.append(packed)
-            device_offsets.append((current_offset, len(packed)))
-            current_offset += len(packed)
-        offset_table.append(device_offsets)
-    # 拼出大data_blob
-    data_blob = b''.join(data_chunks)
-
-    # 封装
-    packed_combine = {
-        "pages_num": 3,
+            page_bytes = msgpack.packb(page_data)
+            page_zlib = zlib.compress(page_bytes)
+            device_offsets.append((current, len(page_zlib), f'page_{device_idx}_{page_idx}'))
+            device_pages_zlib.append(page_zlib)
+            current += len(page_zlib)
+        pages_offset.append(device_offsets)
+        pages_zlib.append(device_pages_zlib)
+    # 3. 头部信息
+    # offsets: [[(start, length, "page_{device_idx}_{page_idx}"), ...], ...]
+    header = {
+        "uniq_frames_offset": uniq_frames_offset,
+        "offset": pages_offset,
+        "pages_num": pages_num,
         "device_num": len(data["device_traces"]),
-        "default_devid": 0,
-        "offset_table": offset_table,
-        "data_blob": data_blob,
-        'uniq':unique
+        "default_devid": default_devid
     }
-    return zlib.compress(msgpack.packb(packed_combine))
+    header_bytes = json.dumps(header).encode()
+    header_size = len(header_bytes)
 
+    # 先拼接所有需要写入的数据
+    header_size_bytes = struct.pack('<I', header_size)
+    pages_bytes = b''.join(
+        page_zlib
+        for device_pages_zlib in pages_zlib
+        for page_zlib in device_pages_zlib
+    )
+    all_bytes = header_size_bytes + header_bytes + uniq_frames_zlib + pages_bytes
+    return all_bytes
     # if device is not None:
     #     warnings.warn(
     #         'device argument is deprecated, plots now contain all device',
@@ -738,7 +760,7 @@ def _format_viz(data, viz_kind, device):
     # return _memory_viz_template.replace('$VIZ_KIND', repr(viz_kind)) \
     #                            .replace('$SNAPSHOT', json_format)
 
-def trace_plot(data, device=None, plot_segments=False):
+def trace_plot(data, device=None, pages_num=1, plot_segments=False):
     """Generate a visualization over time of the memory usage recorded by the trace as an html file.
 
     Args:
@@ -750,7 +772,7 @@ def trace_plot(data, device=None, plot_segments=False):
     Returns:
         str: HTML of visualization
     """
-    return _format_viz(data, 'Active Memory Timeline' if not plot_segments else 'Active Cached Memory Timeline', device)
+    return _format_viz(data, 'Active Memory Timeline' if not plot_segments else 'Active Cached Memory Timeline', device, pages_num)
 
 
 def _profile_to_snapshot(profile):
@@ -928,6 +950,8 @@ if __name__ == "__main__":
         trace_plot_a.add_argument('-d', '--device', type=int, default=None, help=help)
         help = 'path to save the visualization(default: output.html)'
         trace_plot_a.add_argument('-o', '--output', default='output.html', help=help)
+        help = 'split full trace_plot into multi pages to show(default: 1)'
+        trace_plot_a.add_argument('-p', '--pages_num', type=int, default=1, help=help)
         if cmd == "trace_plot":
             help = 'visualize change to segments rather than individual allocations'
             trace_plot_a.add_argument('-s', '--segments', action='store_true', help=help)
@@ -967,7 +991,7 @@ if __name__ == "__main__":
         _write(args.output, compare(before, after))
     elif args.action == 'trace_plot':
         data = _read(args.input)
-        _write(args.output + '.zlib', trace_plot(data, device=args.device, plot_segments=args.segments))
+        _write(args.output + '.zlib', trace_plot(data, device=args.device, pages_num=args.pages_num, plot_segments=args.segments))
     elif args.action == 'segment_plot':
         data = _read(args.input)
         _write(args.output, segment_plot(data, device=args.device))
