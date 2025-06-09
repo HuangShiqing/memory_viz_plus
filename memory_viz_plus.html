@@ -23,7 +23,7 @@ import {selected_change} from "https://cdn.jsdelivr.net/gh/HuangShiqing/memory_v
 // import {finished_loading2} from "./MemoryViz.js"
 // import {selected_change} from "./MemoryViz.js"
 
-const worker = new Worker('decode_worker.js');
+window.worker = new Worker('decode_worker.js');
 function handleFileSelect(evt) {
   evt.stopPropagation();
   evt.preventDefault();
@@ -35,9 +35,10 @@ function handleFileSelect(evt) {
   reader.onload = function(e) {
     var contents = e.target.result;
     // evt.target.result 是 ArrayBuffer
-    const compressed = new Uint8Array(contents);
+    window.compressed = new Uint8Array(contents);
     // 传递给worker，推荐用postMessage的transfer参数避免拷贝
-    worker.postMessage(compressed.buffer, [compressed.buffer]);
+    window.worker.postMessage({"buffer": window.compressed.buffer,
+                               "page_idx": 0});
   };
 
   reader.readAsArrayBuffer(file);
@@ -52,7 +53,7 @@ worker.onmessage = function(e) {
     console.error('Worker 解压/解码出错:', e.data.error);
     return;
   }
-  const unpacked = e.data.unpacked;
+  const unpacked = e.data;
 
   // 你的后续逻辑
   add_snapshot2("hsq_snap", unique_name => {

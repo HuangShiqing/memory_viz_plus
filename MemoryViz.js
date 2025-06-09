@@ -1120,7 +1120,7 @@ function draw(
       .range([canvas.height, 0]);
 
   //last one is summary
-  data.allocations_over_time.slice(0, -1).forEach(d => { 
+  data.allocations_over_time.forEach(d => { 
     // // 1. 计算多边形顶点
     const points = format_points2(d);
 
@@ -1287,7 +1287,11 @@ function MemoryPlot(
 
   // const zoom_group = plot_outer.append('g');
   // const scrub_group = zoom_group.append('g');
-
+  // const select = document.getElementById('my-select');
+  // const rect = select.getBoundingClientRect()
+  // const head_offset = rect.bottom;
+  const head_offset = 33 //TODO:需要将手动指定换成自动对齐
+  yAxisWidth = 60; // Y轴预留宽度
   const canvas = document.getElementById('my-canvas');
   canvas.width = window.innerWidth;
   canvas.height = height;  // 画布的像素高度
@@ -1295,15 +1299,14 @@ function MemoryPlot(
   canvas.style.display = 'block';
   canvas.style.position = 'absolute';
   canvas.style.left = '0px';
-  canvas.style.top = '0px';
+  canvas.style.top = head_offset + 'px';
   offCanvas = new OffscreenCanvas(canvas.width, canvas.height);
 
-  yAxisWidth = 60; // Y轴预留宽度
   const logArea = document.getElementById('log-area');
   // 布局日志区域
   logArea.style.position = 'absolute';
   logArea.style.left = '0px';
-  logArea.style.top = height + 'px';
+  logArea.style.top = head_offset + height + 'px';
   logArea.style.width = window.innerWidth + 'px';
   logArea.style.height = (window.innerHeight - height) + 'px';
   logArea.style.background = '#f9f9f9';
@@ -1734,7 +1737,7 @@ function create_trace_view(
   //   .attr('preserveAspectRatio', 'none')
   //   .attr('style', 'grid-column: 1; grid-row: 1; width: 100%; height: 100%;');
 
-  const plot = MemoryPlot(null, snapshot[device], left_pad, 1024, 576);
+  const plot = MemoryPlot(null, snapshot, left_pad, 1024, 576);
 
   // if (snapshot.categories.length !== 0) {
   //   Legend(plot_svg.append('g'), snapshot.categories);
@@ -2082,6 +2085,9 @@ pre {
 html, body {
   height: 100%;
   overflow: clip;
+}
+select {
+  height: 20px;
 }`;
 
 const head = d3.select('head');
@@ -2093,6 +2099,7 @@ for (const x in kinds) {
   view.append('option').text(x);
 }
 const gpu = body.append('select');
+const pages_select = body.append('select');
 
 function unpickle_and_annotate(data) {
   data = unpickle(data);
@@ -2103,34 +2110,53 @@ function unpickle_and_annotate(data) {
 
 function snapshot_change(f) {
   const view_value = view.node().value;
-  let device = Number(gpu.node().value);
+  // let device = Number(gpu.node().value);
   const snapshot = snapshot_cache[f];
+  gpu.attr('id', 'my-select');
   gpu.selectAll('option').remove();
+  for (let dev_idx = 0; dev_idx < device_num; dev_idx++) {
+    gpu.append('option').text("gpu"+dev_idx);
+  }
+  gpu.node().selectedIndex = default_devid;
+
+  let page_idx;
+  if(pages_select.node().value) {
+    page_idx = parseInt(pages_select.node().value.slice(4), 10);
+  } else {
+    page_idx = 0;
+  }
+  pages_select.selectAll('option').remove();
+  for (let page_id = 0; page_id < pages_num; page_id++) {
+    pages_select.append('option').text("page"+page_id);
+  }
+  pages_select.node().selectedIndex = page_idx;
+
+  kinds[view_value](null, snapshot, default_devid);
   // const has_segments = {};
   // for (const s of snapshot.segments) {
   //   has_segments[s.device] = true;
   // }
-  let device_valid = false;
-  for (const [i, trace] of snapshot.entries()) {
-    if (trace.allocations_over_time.length > 0) {
-      gpu.append('option').text(i);
-      if (i === device) {
-        device_valid = true;
-        gpu.node().selectedIndex = gpu.node().children.length - 1;
-      }
-    }
-  }
-  if (!device_valid) {
-    device = Number(gpu.node().value);
-  }
-  const key = [f, view_value, device];
-  if (!(key in selection_to_div)) {
-    selection_to_div[key] = d3.select('body').append('div');
-    kinds[view_value](selection_to_div[key], snapshot, device);
-  }
-  const selected_div = selection_to_div[key];
+  // let device_valid = false;
+  // for (const [i, trace] of snapshot.entries()) {
+  //   if (trace.allocations_over_time.length > 0) {
+  //     gpu.append('option').text(i);
+  //     if (i === device) {
+  //       device_valid = true;
+  //       gpu.node().selectedIndex = gpu.node().children.length - 1;
+  //     }
+  //   }
+  // }
+  // if (!device_valid) {
+  //   device = Number(gpu.node().value);
+  // }
+  // const key = [f, view_value, device];
+  // if (!(key in selection_to_div)) {
+  //   selection_to_div[key] = d3.select('body').append('div');
+  //   kinds[view_value](selection_to_div[key], snapshot, device);
+  // }
+  // const selected_div = selection_to_div[key];
 
-  selected_div.attr('style', 'display: float; height: 100%');
+  // selected_div.attr('style', 'display: float; height: 100%');
 }
 
 export function selected_change() {
@@ -2148,9 +2174,18 @@ export function selected_change() {
   }
 }
 
+function pages_change() {
+  const page_idx = parseInt(pages_select.node().value.slice(4), 10);
+  window.worker.postMessage({"buffer": window.compressed.buffer,
+                             "page_idx": page_idx});
+  for (let key in snapshot_cache) {
+    delete snapshot_cache[key];
+  }
+}
 snapshot_select.on('change', selected_change);
 view.on('change', selected_change);
 gpu.on('change', selected_change);
+pages_select.on('change', pages_change);
 
 body.on('dragover', e => {
   event.preventDefault();
@@ -2222,19 +2257,25 @@ export function add_local_files(files, view_value) {
 export function add_snapshot2(name, loader) {
   view.node().value = 'Active Memory Timeline';
 
-  if (name in snapshot_to_loader) {
-    name = `${name} (${next_unique_n++})`;
-  }
+  // if (name in snapshot_to_loader) {
+  //   name = `${name} (${next_unique_n++})`;
+  // }
   snapshot_select.append('option').text(name);
   snapshot_to_loader[name] = loader;
 
   selected_change();
 }
 
+let device_num;
+let pages_num;
+let default_devid;
 export function finished_loading2(name, unpacked) {
   // snapshot_cache[name] = unpickle_and_annotate(data);
   var data = unpacked['data']
   uniq_frames = unpacked['uniq']
+  pages_num = unpacked['pages_num']
+  device_num = unpacked['device_num']
+  default_devid = unpacked['default_devid']
   snapshot_cache[name] = data;
   // annotate_snapshot(data);//TODO: need add it in py
   snapshot_change(name);

@@ -384,7 +384,7 @@ add_local_files(local_files, $VIZ_KIND)
 </body>
 """
 
-def process_alloc_data(snapshot, device, plot_segments, max_entries):
+def process_alloc_data(snapshot, device, plot_segments, max_entries, num_pages = 10):
     elements = []
     initially_allocated = []
     actions = []
@@ -396,6 +396,8 @@ def process_alloc_data(snapshot, device, plot_segments, max_entries):
     else:
         free, free_completed = 'free', 'free_completed'
 
+    if len(snapshot['device_traces'][device]) == 0:
+        return []
     # 1. first pass: build elements and actions
     for e in tqdm(snapshot['device_traces'][device], desc = f"dev{device}预处理"):
         action = e['action']
@@ -558,14 +560,106 @@ def process_alloc_data(snapshot, device, plot_segments, max_entries):
         elem['offsets'].append(elem['offsets'][-1])
     data_out.append(summarized_mem)
 
-    return {
+    # pudb.set_trace()
+    # num_pages = 3  # 你可以改成任意整数
+    N = len(max_at_time)
+    page_points = [int(round(i * N / num_pages)) for i in range(num_pages + 1)]
+    page_data_out = [[] for _ in range(num_pages)]
+    # 新增分割 max_at_time
+    page_max_at_time = []
+    for i in range(num_pages):
+        left, right = page_points[i], page_points[i + 1]
+        page_max_at_time.append(max_at_time[left:right])
+
+    for item in data_out[:-1]:#skip summarized
+        timesteps = item['timesteps']
+        min_t = min(timesteps)
+        max_t = max(timesteps)
+
+        for i in range(num_pages):
+            new_item = None
+            left, right = page_points[i], page_points[i + 1]
+            # 完全在当前区间
+            if min_t >= left and max_t <= right:
+                new_item = item.copy()
+                new_item['timesteps'] = [t - left for t in item['timesteps']]
+            # 完全不在当前区间
+            elif max_t <= left or min_t >= right:
+                continue
+            # 完全包裹分段
+            elif min_t <= left and max_t >= right:
+                ts_full = item['timesteps']
+                ofs_full = item['offsets']
+                ts, ofs = [], []
+                for t, o in zip(ts_full, ofs_full):
+                    if left <= t <= right:
+                        ts.append(t)
+                        ofs.append(o)
+                # 补首端
+                if not ts or ts[0] > left:
+                    # 取第一个大于left的点的offset
+                    for j, t in enumerate(ts_full):
+                        if t > left:
+                            ts = [left] + ts
+                            ofs = [ofs_full[j]] + ofs
+                            break
+                # 补尾端
+                if not ts or ts[-1] < right:
+                    # 取最后一个小于right的点的offset
+                    for j in reversed(range(len(ts_full))):
+                        if ts_full[j] < right:
+                            ts.append(right)
+                            ofs.append(ofs_full[j])
+                            break
+                # 按要求减去 left
+                if len(ts) >= 2:
+                    new_item = item.copy()
+                    new_item['timesteps'] = [t - left for t in ts]
+                    new_item['offsets'] = ofs
+            # 跨区间
+            else:
+                # 找区间内的timesteps和offsets
+                ts, ofs = [], []
+                ts_full = item['timesteps']
+                ofs_full = item['offsets']
+                for t, o in zip(ts_full, ofs_full):
+                    if left <= t <= right:
+                        ts.append(t)
+                        ofs.append(o)
+                # 补首端
+                if ts and ts[0] > left and min_t < left:
+                    ts = [left] + ts
+                    idx = ts_full.index(ts[1])
+                    ofs = [ofs_full[idx]] + ofs
+                # 补尾端
+                if ts and ts[-1] < right and max_t > right:
+                    ts.append(right)
+                    idx = ts_full.index(ts[-2])
+                    ofs.append(ofs_full[idx])
+                # 按要求减去 left
+                if len(ts) >= 2:
+                    new_item = item.copy()
+                    new_item['timesteps'] = [t - left for t in ts]
+                    new_item['offsets'] = ofs
+                    
+            if new_item:
+                page_data_out[i].append(new_item)
+
+    return [ {
+        'page_num': num_pages,
         'max_size': max_size,
-        'allocations_over_time': data_out,
-        'max_at_time': max_at_time,
-        'summarized_mem': summarized_mem,
-        'elements_length': len(elements),
-        'elements': elements
-    }
+        'allocations_over_time': page_data_out[i],
+        'max_at_time': page_max_at_time[i],
+        } for i in range(num_pages)]
+    # return {
+    #     'page_num': num_pages,
+    #     'max_size': max_size,
+    #     'page_allocations_over_time': page_data_out,
+    #     "page_max_timestep": page_max_timestep,
+    #     'summarized_mem': summarized_mem,
+    #     'elements_length': len(elements),
+    #     'elements': elements #TODO: split page
+    # }
 
 def _format_viz(data, viz_kind, device):
 
@@ -601,10 +695,33 @@ def _format_viz(data, viz_kind, device):
 
     data_outs =[]
     for device_idx in range(len(data["device_traces"])):
-        data_out = process_alloc_data(data, device_idx, False, None)
+        data_out = process_alloc_data(data, device_idx, False, None, num_pages = 3)
         data_outs.append(data_out)
-    packed_combine = msgpack.packb({'data':data_outs, 'uniq':unique})
-    return zlib.compress(packed_combine)
+
+    offset_table = []
+    current_offset = 0
+    data_chunks = []
+    for device_idx, device_pages in enumerate(data_outs):
+        device_offsets = []
+        for page_idx, page_data in enumerate(device_pages):
+            packed = msgpack.packb(page_data)
+            data_chunks.append(packed)
+            device_offsets.append((current_offset, len(packed)))
+            current_offset += len(packed)
+        offset_table.append(device_offsets)
+    # 拼出大data_blob
+    data_blob = b''.join(data_chunks)
+
+    # 封装
+    packed_combine = {
+        "pages_num": 3,
+        "device_num": len(data["device_traces"]),
+        "default_devid": 0,
+        "offset_table": offset_table,
+        "data_blob": data_blob,
+        'uniq':unique
+    }
+    return zlib.compress(msgpack.packb(packed_combine))
 
     # if device is not None:
     #     warnings.warn(
