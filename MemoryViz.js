@@ -1290,7 +1290,7 @@ function MemoryPlot(
   // const select = document.getElementById('my-select');
   // const rect = select.getBoundingClientRect()
   // const head_offset = rect.bottom;
-  const head_offset = 33 //TODO:需要将手动指定换成自动对齐
+  const head_offset = 63 //TODO:需要将手动指定换成自动对齐
   yAxisWidth = 60; // Y轴预留宽度
   const canvas = document.getElementById('my-canvas');
   canvas.width = window.innerWidth;
@@ -1709,19 +1709,19 @@ function create_trace_view(
 ) {
   const left_pad = 70;
   // const data = process_alloc_data(snapshot, device, plot_segments, max_entries);
-  // dst.selectAll('svg').remove();
-  // dst.selectAll('div').remove();
+  dst.selectAll('svg').remove();
+  dst.selectAll('div').remove();
 
-  // const d = dst.append('div');
-  // d.append('input')
-  //   .attr('type', 'range')
-  //   .attr('min', 0)
-  //   .attr('max', data.elements_length)
-  //   .attr('value', max_entries)
-  //   .on('change', function () {
-  //     create_trace_view(dst, snapshot, device, plot_segments, this.value);
-  //   });
-  // d.append('label').text('Detail');
+  const d = dst.append('div');
+  d.append('input')
+    .attr('type', 'range')
+    .attr('min', 0)
+    .attr('max', snapshot.allocations_over_time.length)
+    .attr('value', max_entries)
+    .on('change', function () {
+      create_trace_view(dst, snapshot, device, plot_segments, this.value);
+    });//TODO: 由于改了snapshot只能减少不能增加显示
+  d.append('label').text('Detail');
 
   // const grid_container = dst
   //   .append('div')
@@ -1737,6 +1737,9 @@ function create_trace_view(
   //   .attr('preserveAspectRatio', 'none')
   //   .attr('style', 'grid-column: 1; grid-row: 1; width: 100%; height: 100%;');
 
+  snapshot.allocations_over_time = snapshot.allocations_over_time
+                                    .sort((a, b) => b.size*(b.timesteps.at(-1)-b.timesteps[0]) - a.size*(a.timesteps.at(-1)-a.timesteps[0]))   // 按面积降序排序
+                                    .slice(0, max_entries);
   const plot = MemoryPlot(null, snapshot, left_pad, 1024, 576);
 
   // if (snapshot.categories.length !== 0) {
@@ -2131,7 +2134,11 @@ function snapshot_change(f) {
   }
   pages_select.node().selectedIndex = page_idx;
 
-  kinds[view_value](null, snapshot, default_devid);
+  if (!selection_to_div[f]) {
+    selection_to_div[f] = d3.select('body').append('div')
+  }
+
+  kinds[view_value](selection_to_div[f], snapshot, default_devid);
   // const has_segments = {};
   // for (const s of snapshot.segments) {
   //   has_segments[s.device] = true;
@@ -2162,6 +2169,7 @@ function snapshot_change(f) {
 export function selected_change() {
   for (const d of Object.values(selection_to_div)) {
     d.attr('style', 'display: none; height: 100%');
+    break //only hidden "Drag and drop a file to load a local snapshot"
   }
   const f = snapshot_select.node().value;
   if (f === '') {
