@@ -1033,7 +1033,8 @@ let last_click;
 
 function draw(
   data,
-  colors
+  colors,
+  max_entries
 ) {
   function drawYAxis(ctx, yscale2, minValue, maxValue, height) {
     /**
@@ -1120,7 +1121,7 @@ function draw(
       .range([canvas.height, 0]);
 
   //last one is summary
-  data.allocations_over_time.forEach(d => { 
+  data.allocations_over_time.slice(0, max_entries).forEach(d => {
     // // 1. 计算多边形顶点
     const points = format_points2(d);
 
@@ -1240,6 +1241,7 @@ function MemoryPlot(
   left_pad,
   width,
   height,
+  max_entries,
   colors = schemeTableau10,
 ) {
   function format_points(d) {
@@ -1403,7 +1405,7 @@ function MemoryPlot(
       if (offsetX < 0) offsetX = 0;
       if (offsetY < 0) offsetY = 0;
 
-      draw(data, colors);
+      draw(data, colors, max_entries);
   }, draw_time));
 
   document.addEventListener('mouseup', throttle(function(e) {
@@ -1478,8 +1480,8 @@ function MemoryPlot(
           .range([canvas.height, 0]);
   
       let selectedIdx = -1;
-      const arr = data.allocations_over_time;
-      for (let idx = 0; idx < arr.length - 1; idx++) {
+      const arr = data.allocations_over_time.slice(0, max_entries);
+      for (let idx = 0; idx < arr.length; idx++) {
           const d = arr[idx];
           // 多边形顶点
           const points = (() => {
@@ -1534,7 +1536,7 @@ function MemoryPlot(
       isDragging = false;
   });
 
-  draw(data, colors)
+  draw(data, colors, max_entries)
 
   // const plot = scrub_group
   //   .selectAll('polygon')
@@ -1720,7 +1722,7 @@ function create_trace_view(
     .attr('value', max_entries)
     .on('change', function () {
       create_trace_view(dst, snapshot, device, plot_segments, this.value);
-    });//TODO: 由于改了snapshot只能减少不能增加显示
+    });
   d.append('label').text('Detail');
 
   // const grid_container = dst
@@ -1739,8 +1741,8 @@ function create_trace_view(
 
   snapshot.allocations_over_time = snapshot.allocations_over_time
                                     .sort((a, b) => b.size*(b.timesteps.at(-1)-b.timesteps[0]) - a.size*(a.timesteps.at(-1)-a.timesteps[0]))   // 按面积降序排序
-                                    .slice(0, max_entries);
-  const plot = MemoryPlot(null, snapshot, left_pad, 1024, 576);
+                                    // .slice(0, max_entries);
+  const plot = MemoryPlot(null, snapshot, left_pad, 1024, 576, max_entries);
 
   // if (snapshot.categories.length !== 0) {
   //   Legend(plot_svg.append('g'), snapshot.categories);
