@@ -564,6 +564,7 @@ def process_alloc_data(snapshot, device, plot_segments, max_entries, pages_num=1
     N = len(max_at_time)
     page_points = [int(round(i * N / pages_num)) for i in range(pages_num + 1)]
     page_data_out = [[] for _ in range(pages_num)]
+    page_elements_out = [[] for _ in range(pages_num)]
     # 新增分割 max_at_time
     page_max_at_time = []
     for i in range(pages_num):
@@ -643,12 +644,15 @@ def process_alloc_data(snapshot, device, plot_segments, max_entries, pages_num=1
 
             if new_item:
                 page_data_out[i].append(new_item)
+                page_elements_out[i].append(elements[new_item['elem']])
+                new_item['elem'] = len(page_elements_out[i]) - 1
 
     return [ {
         'page_num': pages_num,
         'max_size': max_size,
         'allocations_over_time': page_data_out[i],
         'max_at_time': page_max_at_time[i],
+        'elements': page_elements_out[i]
         } for i in range(pages_num)]
     # return {
     #     'page_num': pages_num,

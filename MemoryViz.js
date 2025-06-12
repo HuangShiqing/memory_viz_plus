@@ -775,7 +775,6 @@ function format_frames(frames) {
   return elideRepeats(frame_strings).join('\n');
 }
 
-var uniq_frames = null
 function format_frames2(frames) {
   if (frames.length === 0) {
     return (
@@ -1739,9 +1738,21 @@ function create_trace_view(
   //   .attr('preserveAspectRatio', 'none')
   //   .attr('style', 'grid-column: 1; grid-row: 1; width: 100%; height: 100%;');
 
-  snapshot.allocations_over_time = snapshot.allocations_over_time
-                                    .sort((a, b) => b.size*(b.timesteps.at(-1)-b.timesteps[0]) - a.size*(a.timesteps.at(-1)-a.timesteps[0]))   // 按面积降序排序
-                                    // .slice(0, max_entries);
+  // 重排allocations_over_time时要对应重排elements, 两者一一对应
+  // 1. 先生成索引数组，记录原始位置
+  const indices = Array.from(snapshot.allocations_over_time.keys());
+  // 2. 对索引数组排序，按照你的面积排序规则
+  indices.sort(
+    (i, j) => {
+      const a = snapshot.allocations_over_time[i];
+      const b = snapshot.allocations_over_time[j];
+      return b.size * (b.timesteps.at(-1) - b.timesteps[0]) - a.size * (a.timesteps.at(-1) - a.timesteps[0]);
+    }
+  );
+  // 3. 新的排序后数组
+  snapshot.allocations_over_time = indices.map(i => snapshot.allocations_over_time[i]);
+  snapshot.elements = indices.map(i => snapshot.elements[i]);
+
   const plot = MemoryPlot(null, snapshot, left_pad, 1024, 576, max_entries);
 
   // if (snapshot.categories.length !== 0) {
@@ -2281,6 +2292,7 @@ export function add_snapshot2(name, loader) {
 let device_num;
 let pages_num;
 let default_devid;
+let uniq_frames;
 export function finished_loading2(name, unpacked) {
   // snapshot_cache[name] = unpickle_and_annotate(data);
   var data = unpacked['data']
