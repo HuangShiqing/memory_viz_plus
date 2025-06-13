@@ -2214,19 +2214,24 @@ body.on('dragover', e => {
 
 body.on('drop', () => {
   console.log(event.dataTransfer.files);
-  Array.from(event.dataTransfer.files).forEach(file => {
-    add_snapshot(file.name, unique_name => {
-      const reader = new FileReader();
-      reader.onload = e => {
-        finished_loading(unique_name, e.target.result);
-      };
-      reader.readAsArrayBuffer(file);
-    });
-  });
+  var files = event.dataTransfer.files;
+  var file = files[0];
+  window.file_name = file.name;
+  const reader = new FileReader();
+  reader.onload = e => {
+    var contents = e.target.result;
+    // evt.target.result 是 ArrayBuffer
+    window.compressed = new Uint8Array(contents);
+    // 传递给worker，推荐用postMessage的transfer参数避免拷贝
+    window.worker.postMessage({"buffer": window.compressed.buffer,
+                                "page_idx": 0});
+  };
+  reader.readAsArrayBuffer(file);
   event.preventDefault();
+
   snapshot_select.node().selectedIndex =
     snapshot_select.node().options.length - 1;
-  selected_change();
+  // selected_change();
 });
 
 selection_to_div[''] = body

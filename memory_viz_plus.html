@@ -4,11 +4,9 @@
 <head>
 </head>
 <body>
-<canvas id="my-canvas" width="400" height="300" style="border:1px solid #ccc"></canvas>
+<canvas id="my-canvas" width="400" height="300" style="display:none;border:1px solid #ccc"></canvas>
 <div id="log-area" style="width:100%;margin-top:10px;color:#333;font-family:monospace"></div>
 
-<div id="drop_zone" style="border: 1px solid black; width: 200px; height: 100px;">
-    Drop files here
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/msgpack-lite/0.1.26/msgpack.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/pako@2.1.0/dist/pako.min.js"></script>
@@ -24,29 +22,6 @@ import {selected_change} from "https://cdn.jsdelivr.net/gh/HuangShiqing/memory_v
 // import {selected_change} from "./MemoryViz.js"
 
 window.worker = new Worker('decode_worker.js');
-function handleFileSelect(evt) {
-  evt.stopPropagation();
-  evt.preventDefault();
-
-  var files = evt.dataTransfer.files;
-  var file = files[0];
-  var reader = new FileReader();
-
-  reader.onload = function(e) {
-    var contents = e.target.result;
-    // evt.target.result 是 ArrayBuffer
-    window.compressed = new Uint8Array(contents);
-    // 传递给worker，推荐用postMessage的transfer参数避免拷贝
-    window.worker.postMessage({"buffer": window.compressed.buffer,
-                               "page_idx": 0});
-  };
-
-  reader.readAsArrayBuffer(file);
-
-  // 隐藏 drop_zone 元素
-  dropZone.style.display = 'none';
-}
-
 // 接收worker的结果
 worker.onmessage = function(e) {
   if (e.data.error) {
@@ -56,20 +31,10 @@ worker.onmessage = function(e) {
   const unpacked = e.data;
 
   // 你的后续逻辑
-  add_snapshot2("hsq_snap", unique_name => {
+  add_snapshot2(window.file_name, unique_name => {
     finished_loading2(unique_name, unpacked);
   })
 };
-
-function handleDragOver(evt) {
-  evt.stopPropagation();
-  evt.preventDefault();
-  evt.dataTransfer.dropEffect = 'copy';
-}
-
-var dropZone = document.getElementById('drop_zone');
-dropZone.addEventListener('dragover', handleDragOver, false);
-dropZone.addEventListener('drop', handleFileSelect, false);
 
 </script>
 </body>
