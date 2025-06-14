@@ -1704,7 +1704,6 @@ function Legend(plot_svg, categories) {
 function create_trace_view(
   dst,
   snapshot,
-  device,
   plot_segments = false,
   max_entries = 15000,
 ) {
@@ -1720,7 +1719,7 @@ function create_trace_view(
     .attr('max', snapshot.allocations_over_time.length)
     .attr('value', max_entries)
     .on('change', function () {
-      create_trace_view(dst, snapshot, device, plot_segments, this.value);
+      create_trace_view(dst, snapshot, plot_segments, this.value);
     });
   d.append('label').text('Detail');
 
@@ -2083,10 +2082,10 @@ function decode_base64(input) {
 
 const kinds = {
   'Active Memory Timeline': create_trace_view,
-  'Allocator State History': create_segment_view,
-  'Active Cached Segment Timeline': (dst, snapshot, device) =>
-    create_trace_view(dst, snapshot, device, true),
-  'Allocator Settings': create_settings_view,
+  // 'Allocator State History': create_segment_view,
+  // 'Active Cached Segment Timeline': (dst, snapshot, device) =>
+  //   create_trace_view(dst, snapshot, device, true),
+  // 'Allocator Settings': create_settings_view,
 };
 
 const snapshot_cache = {};
@@ -2126,14 +2125,20 @@ function unpickle_and_annotate(data) {
 
 function snapshot_change(f) {
   const view_value = view.node().value;
-  // let device = Number(gpu.node().value);
   const snapshot = snapshot_cache[f];
+
+  let dev_idx;
+  if(gpu.node().value) {
+    dev_idx = Number(gpu.node().value.slice(3));
+  } else {
+    dev_idx = avail_device[0];
+  }
   gpu.attr('id', 'my-select');
   gpu.selectAll('option').remove();
   avail_device.forEach(dev_idx => {
     gpu.append('option').text("gpu"+dev_idx);
   })
-  gpu.node().selectedIndex = default_devid;
+  gpu.node().selectedIndex = dev_idx;
 
   let page_idx;
   if(pages_select.node().value) {
@@ -2151,7 +2156,7 @@ function snapshot_change(f) {
     selection_to_div[f] = d3.select('body').append('div')
   }
 
-  kinds[view_value](selection_to_div[f], snapshot, default_devid);
+  kinds[view_value](selection_to_div[f], snapshot);
   // const has_segments = {};
   // for (const s of snapshot.segments) {
   //   has_segments[s.device] = true;
@@ -2196,16 +2201,18 @@ export function selected_change() {
 }
 
 function pages_change() {
+  const dev_idx = parseInt(gpu.node().value.slice(3), 10);
   const page_idx = parseInt(pages_select.node().value.slice(4), 10);
   window.worker.postMessage({"buffer": window.compressed.buffer,
+                             "dev_idx": dev_idx,
                              "page_idx": page_idx});
   for (let key in snapshot_cache) {
     delete snapshot_cache[key];
   }
 }
-snapshot_select.on('change', selected_change);
-view.on('change', selected_change);
-gpu.on('change', selected_change);
+// snapshot_select.on('change', selected_change);
+// view.on('change', selected_change);
+gpu.on('change', pages_change);
 pages_select.on('change', pages_change);
 
 body.on('dragover', e => {
@@ -2224,7 +2231,8 @@ body.on('drop', () => {
     window.compressed = new Uint8Array(contents);
     // 传递给worker，推荐用postMessage的transfer参数避免拷贝
     window.worker.postMessage({"buffer": window.compressed.buffer,
-                                "page_idx": 0});
+                               "dev_idx": -1,
+                               "page_idx": 0});
   };
   reader.readAsArrayBuffer(file);
   event.preventDefault();
@@ -2296,7 +2304,6 @@ export function add_snapshot2(name, loader) {
 
 let avail_device;
 let pages_num;
-let default_devid;
 let uniq_frames;
 export function finished_loading2(name, unpacked) {
   // snapshot_cache[name] = unpickle_and_annotate(data);
@@ -2304,7 +2311,6 @@ export function finished_loading2(name, unpacked) {
   uniq_frames = unpacked['uniq_frames']
   pages_num = unpacked['pages_num']
   avail_device = unpacked['avail_device']
-  default_devid = unpacked['default_devid']
   snapshot_cache[name] = data;
   // annotate_snapshot(data);//TODO: need add it in py
   snapshot_change(name);

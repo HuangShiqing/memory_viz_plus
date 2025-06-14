@@ -669,7 +669,6 @@ def _format_viz(data, viz_kind, device, pages_num):
     seen = {}
     unique = []
     max_traces_num = -1
-    default_devid = 0
     avail_device = []
     for device_idx in range(len(data["device_traces"])):
         if len(data["device_traces"][device_idx]) == 0: #skip empty
@@ -677,7 +676,6 @@ def _format_viz(data, viz_kind, device, pages_num):
         avail_device.append(device_idx)
         if len(data["device_traces"][device_idx]) > max_traces_num:
             max_traces_num = len(data["device_traces"][device_idx])
-            default_devid = device_idx
         for alloc_idx in tqdm(range(len(data["device_traces"][device_idx])), desc = f"dev{device_idx}去重"):
             frames = data["device_traces"][device_idx][alloc_idx]["frames"]
             keys = ["filename", "line", "name"]
@@ -737,7 +735,6 @@ def _format_viz(data, viz_kind, device, pages_num):
         "offset": pages_offset,
         "pages_num": pages_num,
         "avail_device": avail_device,
-        "default_devid": default_devid
     }
     header_bytes = json.dumps(header).encode()
     header_size = len(header_bytes)
