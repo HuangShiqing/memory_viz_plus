@@ -792,7 +792,7 @@ function format_frames2(frames) {
   const frame_strings = new_frames
     .filter(frameFilter)
     .map(f => `${f.filename}:${f.line}:${f.name}`);
-  return elideRepeats(frame_strings).join('\n');
+  return elideRepeats(frame_strings).join('\n\n');
 }
 
 // let elements = [];
