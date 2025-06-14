@@ -670,9 +670,11 @@ def _format_viz(data, viz_kind, device, pages_num):
     unique = []
     max_traces_num = -1
     default_devid = 0
+    avail_device = []
     for device_idx in range(len(data["device_traces"])):
         if len(data["device_traces"][device_idx]) == 0: #skip empty
             continue
+        avail_device.append(device_idx)
         if len(data["device_traces"][device_idx]) > max_traces_num:
             max_traces_num = len(data["device_traces"][device_idx])
             default_devid = device_idx
@@ -734,7 +736,7 @@ def _format_viz(data, viz_kind, device, pages_num):
         "uniq_frames_offset": uniq_frames_offset,
         "offset": pages_offset,
         "pages_num": pages_num,
-        "device_num": len(data["device_traces"]),
+        "avail_device": avail_device,
         "default_devid": default_devid
     }
     header_bytes = json.dumps(header).encode()

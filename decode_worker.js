@@ -13,7 +13,7 @@ onmessage = function(e) {
       const header_bytes = new Uint8Array(buffer, 4, header_size);
       const header_str = new TextDecoder().decode(header_bytes);
       const header = JSON.parse(header_str);
-      const device_num = header.device_num
+      const avail_device = header.avail_device
       const pages_num = header.pages_num
       const default_devid = header.default_devid
 
@@ -35,7 +35,7 @@ onmessage = function(e) {
       postMessage({"data":page_obj,
                    "uniq_frames":uniq_frames_obj,
                    "default_devid":default_devid,
-                   "device_num":device_num,
+                   "avail_device":avail_device,
                    "pages_num":pages_num});
     } catch (err) {
       postMessage({error: err.message});

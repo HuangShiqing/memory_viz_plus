@@ -2130,9 +2130,9 @@ function snapshot_change(f) {
   const snapshot = snapshot_cache[f];
   gpu.attr('id', 'my-select');
   gpu.selectAll('option').remove();
-  for (let dev_idx = 0; dev_idx < device_num; dev_idx++) {
+  avail_device.forEach(dev_idx => {
     gpu.append('option').text("gpu"+dev_idx);
-  }
+  })
   gpu.node().selectedIndex = default_devid;
 
   let page_idx;
@@ -2294,7 +2294,7 @@ export function add_snapshot2(name, loader) {
   selected_change();
 }
 
-let device_num;
+let avail_device;
 let pages_num;
 let default_devid;
 let uniq_frames;
@@ -2303,7 +2303,7 @@ export function finished_loading2(name, unpacked) {
   var data = unpacked['data']
   uniq_frames = unpacked['uniq_frames']
   pages_num = unpacked['pages_num']
-  device_num = unpacked['device_num']
+  avail_device = unpacked['avail_device']
   default_devid = unpacked['default_devid']
   snapshot_cache[name] = data;
   // annotate_snapshot(data);//TODO: need add it in py
